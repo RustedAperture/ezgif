@@ -5,9 +5,21 @@ use std::{env, fs, net::SocketAddr, path::PathBuf};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct RootAdminConfig {
     configured_identities: HashSet<String>,
+}
+
+impl std::fmt::Debug for RootAdminConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RootAdminConfig")
+            .field(
+                "configured_identity_count",
+                &self.configured_identities.len(),
+            )
+            .finish()
+    }
 }
 
 impl RootAdminConfig {
@@ -196,6 +208,13 @@ mod tests {
 
         assert!(config.is_configured_identity("discord", "123"));
         assert!(config.is_configured_identity("telegram", "456"));
+    }
+
+    #[test]
+    fn debug_output_redacts_configured_provider_ids() {
+        let config = RootAdminConfig::parse("discord:123456789").unwrap();
+
+        assert!(!format!("{config:?}").contains("discord:123456789"));
     }
 
     #[test]
