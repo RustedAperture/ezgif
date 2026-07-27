@@ -5,8 +5,17 @@ import { toast } from "sonner";
 import { apiGet, apiPatch } from "@/lib/api";
 import type { AdminPermissions, AdminUser } from "@/lib/types";
 import { useUser } from "@/components/user-provider";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -137,9 +146,9 @@ export function AdminUsersTable() {
               <TableHead>User</TableHead>
               <TableHead>Linked identities</TableHead>
               <TableHead>Role</TableHead>
-              <TableHead>Upload</TableHead>
-              <TableHead>Stats</TableHead>
-              <TableHead>Manage permissions</TableHead>
+              <TableHead className="text-center">Upload</TableHead>
+              <TableHead className="text-center">Stats</TableHead>
+              <TableHead className="text-center">Manage permissions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -162,35 +171,37 @@ export function AdminUsersTable() {
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
                       {target.identities.map((identity) => (
-                        <span key={`${identity.provider}:${identity.masked_id}`} className="rounded-full bg-secondary px-2 py-0.5 text-xs">
+                        <Badge key={`${identity.provider}:${identity.masked_id}`} variant="secondary">
                           {identity.masked_id}
-                        </span>
+                        </Badge>
                       ))}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <select
-                      aria-label={`Role for ${label}`}
-                      className="h-9 rounded-3xl bg-input/50 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                    <Select
                       value={target.role}
                       disabled={roleDisabled}
-                      onChange={(event) => void updateRole(target, event.target.value as AdminUser["role"])}
+                      onValueChange={(value) => void updateRole(target, value as AdminUser["role"])}
                     >
-                      <option value="user">User</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                      <SelectTrigger aria-label={`Role for ${label}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user">User</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </TableCell>
                   {(Object.keys(permissionLabels) as PermissionName[]).map((permission) => {
                     const control = `${target.id}:${permission}`;
                     const disabled = pendingControls.has(control) || (permission === "manage_permissions" && !isRootAdmin);
                     return (
-                      <TableCell key={permission}>
-                        <input
-                          type="checkbox"
+                      <TableCell key={permission} className="text-center">
+                        <Checkbox
                           aria-label={`${permissionLabels[permission]} for ${label}`}
                           checked={target.permissions[permission]}
                           disabled={disabled}
-                          onChange={(event) => void updatePermission(target, permission, event.target.checked)}
+                          onCheckedChange={(checked) => void updatePermission(target, permission, checked === true)}
                         />
                       </TableCell>
                     );

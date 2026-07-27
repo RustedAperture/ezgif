@@ -48,6 +48,10 @@ function adminUser(username: string) {
   };
 }
 
+function isDisabled(element: HTMLElement) {
+  return element.hasAttribute("disabled") || element.getAttribute("aria-disabled") === "true";
+}
+
 describe("AdminUsersTable", () => {
   afterEach(cleanup);
 
@@ -86,10 +90,25 @@ describe("AdminUsersTable", () => {
     await screen.findByText("member");
 
     expect(screen.getByText("discord:****1234")).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Role for member" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("checkbox", { name: "Upload local images for member" }).hasAttribute("disabled")).toBe(false);
-    expect(screen.getByRole("checkbox", { name: "View admin stats for member" }).hasAttribute("disabled")).toBe(false);
-    expect(screen.getByRole("checkbox", { name: "Manage permissions for member" }).hasAttribute("disabled")).toBe(true);
+    expect(isDisabled(screen.getByRole("combobox", { name: "Role for member" }))).toBe(true);
+    expect(isDisabled(screen.getByRole("checkbox", { name: "Upload local images for member" }))).toBe(false);
+    expect(isDisabled(screen.getByRole("checkbox", { name: "View admin stats for member" }))).toBe(false);
+    expect(isDisabled(screen.getByRole("checkbox", { name: "Manage permissions for member" }))).toBe(true);
+  });
+
+  it("centers permission headings and checkbox cells", async () => {
+    render(<AdminUsersTable />);
+
+    await screen.findByText("member");
+
+    for (const heading of ["Upload", "Stats", "Manage permissions"]) {
+      expect(screen.getByRole("columnheader", { name: heading }).className).toContain("text-center");
+    }
+
+    for (const permission of ["Upload local images", "View admin stats", "Manage permissions"]) {
+      const checkbox = screen.getByRole("checkbox", { name: permission + " for member" });
+      expect(checkbox.closest("td")?.className).toContain("text-center");
+    }
   });
 
   it("keeps the most recently submitted search results when an older request settles later", async () => {
