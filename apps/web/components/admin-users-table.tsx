@@ -10,6 +10,16 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -33,6 +43,12 @@ const permissionLabels: Record<PermissionName, string> = {
   manage_permissions: "Manage permissions",
 };
 
+type PendingRoleChange = {
+  userId: string;
+  nextRole: AdminUser["role"];
+  previous: AdminUser;
+};
+
 export function AdminUsersTable() {
   const { user } = useUser();
   const isRootAdmin = user?.is_root_admin === true;
@@ -41,6 +57,7 @@ export function AdminUsersTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [pendingControls, setPendingControls] = useState<Set<string>>(new Set());
+  const [pendingRoleChange, setPendingRoleChange] = useState<PendingRoleChange | null>(null);
   const requestGeneration = useRef(0);
 
   const loadUsers = useCallback(async (searchQuery: string) => {
@@ -80,16 +97,48 @@ export function AdminUsersTable() {
     });
   }
 
-  async function updateRole(target: AdminUser, role: AdminUser["role"]) {
+  function updateUserRow(userId: string, updater: (user: AdminUser) => AdminUser) {
+    setUsers((current) => current.map((item) => (item.id === userId ? updater(item) : item)));
+  }
+
+  function requestRoleChange(target: AdminUser, role: AdminUser["role"]) {
     if (!isRootAdmin || target.is_root_admin || target.role === role) return;
 
-    const control = `${target.id}:role`;
+    setPendingRoleChange({
+      userId: target.id,
+      nextRole: role,
+      previous: {
+        ...target,
+        permissions: { ...target.permissions },
+        identities: [...target.identities],
+      },
+    });
+  }
+
+  async function confirmRoleChange() {
+    if (!pendingRoleChange) return;
+
+    const { nextRole, previous, userId } = pendingRoleChange;
+    const control = `${userId}:role`;
     setControlPending(control, true);
-    setUsers((current) => current.map((item) => (item.id === target.id ? { ...item, role } : item)));
+    const snapshot = previous;
     try {
-      await apiPatch<{ role: AdminUser["role"] }, void>(`/api/admin/users/${target.id}/role`, { role });
+      await apiPatch<{ role: AdminUser["role"] }, void>(`/api/admin/users/${userId}/role`, { role: nextRole });
+      updateUserRow(userId, (item) => ({
+        ...item,
+        role: nextRole,
+        permissions: nextRole === "admin"
+          ? {
+            upload_local_images: true,
+            view_admin_stats: true,
+            manage_permissions: true,
+          }
+          : item.permissions,
+      }));
+      setPendingRoleChange(null);
     } catch {
-      setUsers((current) => current.map((item) => (item.id === target.id ? { ...item, role: target.role } : item)));
+      updateUserRow(userId, () => snapshot);
+      setPendingRoleChange(null);
       toast.error("Could not update the user's role.");
     } finally {
       setControlPending(control, false);
@@ -181,7 +230,7 @@ export function AdminUsersTable() {
                     <Select
                       value={target.role}
                       disabled={roleDisabled}
-                      onValueChange={(value) => void updateRole(target, value as AdminUser["role"])}
+                      onValueChange={(value) => requestRoleChange(target, value as AdminUser["role"])}
                     >
                       <SelectTrigger aria-label={`Role for ${label}`}>
                         <SelectValue />
@@ -212,6 +261,34 @@ export function AdminUsersTable() {
           </TableBody>
         </Table>
       )}
+
+      <AlertDialog open={pendingRoleChange !== null} onOpenChange={(open) => !open && setPendingRoleChange(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm role change</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingRoleChange && (
+                <>
+                  Change {pendingRoleChange.previous.username ?? pendingRoleChange.previous.display_name ?? "this user"} from{" "}
+                  {pendingRoleChange.previous.role} → {pendingRoleChange.nextRole}?
+                  {pendingRoleChange.previous.role === "user" && pendingRoleChange.nextRole === "admin"
+                    ? " All permissions will be granted."
+                    : ""}
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void confirmRoleChange()}
+              disabled={pendingRoleChange ? pendingControls.has(`${pendingRoleChange.userId}:role`) : false}
+            >
+              Confirm
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }
