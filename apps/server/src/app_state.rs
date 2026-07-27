@@ -1,4 +1,5 @@
 use crate::repositories::{
+    admin::AdminRepository,
     buckets::{BucketRepo, BucketRepository},
     cached::{CachedBucketRepository, CachedImageRepository},
     images::{ImageRepo, ImageRepository},
@@ -25,6 +26,7 @@ pub struct GifSearchCacheEntry {
 pub struct AppState {
     pub pool: SqlitePool,
     pub user_repo: Arc<dyn UserRepo>,
+    pub admin_repo: Arc<AdminRepository>,
     pub bucket_repo: Arc<dyn BucketRepo>,
     pub image_repo: Arc<dyn ImageRepo>,
     pub send_history_repo: Arc<dyn SendHistoryRepo>,
@@ -45,6 +47,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(pool: SqlitePool) -> Self {
         let user_repo = Arc::new(UserRepository::new(pool.clone()));
+        let admin_repo = Arc::new(AdminRepository::new(pool.clone()));
         let bucket_repo = Arc::new(CachedBucketRepository::new(BucketRepository::new(
             pool.clone(),
         )));
@@ -56,6 +59,7 @@ impl AppState {
         Self {
             pool,
             user_repo,
+            admin_repo,
             bucket_repo,
             image_repo,
             send_history_repo,

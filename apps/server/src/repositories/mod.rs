@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod buckets;
 pub mod cached;
 pub mod images;
