@@ -337,6 +337,40 @@ async fn configured_root_admin_cannot_be_demoted() {
 }
 
 #[tokio::test]
+async fn promoting_a_user_to_admin_grants_all_permissions_idempotently() {
+    let fixture = admin_fixture().await;
+
+    assert_eq!(
+        patch_role(&fixture.app, &fixture.root, fixture.normal_user.id, "admin")
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    let promoted =
+        json_body(get_admin_users(&fixture.app, &fixture.root, "normal-user").await).await;
+    assert_eq!(promoted[0]["role"], "admin");
+    assert_eq!(promoted[0]["permissions"]["upload_local_images"], true);
+    assert_eq!(promoted[0]["permissions"]["view_admin_stats"], true);
+    assert_eq!(promoted[0]["permissions"]["manage_permissions"], true);
+
+    assert_eq!(
+        patch_role(&fixture.app, &fixture.root, fixture.normal_user.id, "admin")
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    let granted_permissions: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM user_permissions WHERE user_id = ?")
+            .bind(fixture.normal_user.id.to_string())
+            .fetch_one(&fixture.pool)
+            .await
+            .unwrap();
+    assert_eq!(granted_permissions, 3);
+}
+
+#[tokio::test]
 async fn admins_can_toggle_upload_and_stats_but_not_manage_permissions() {
     let fixture = admin_fixture().await;
     assert_eq!(

@@ -5,6 +5,10 @@ use uuid::Uuid;
 
 use super::users::StoredIdentity;
 
+const UPLOAD_LOCAL_IMAGES: &str = "upload_local_images";
+const VIEW_ADMIN_STATS: &str = "view_admin_stats";
+const MANAGE_PERMISSIONS: &str = "manage_permissions";
+
 type StoredIdentityRow = (String, String, String, Option<String>, Option<String>);
 
 #[derive(Clone)]
@@ -99,6 +103,35 @@ impl AdminRepository {
     }
 
     pub async fn set_role(&self, user_id: Uuid, role: &str) -> Result<bool, sqlx::Error> {
+        if role == "admin" {
+            let mut tx = self.pool.begin().await?;
+            let result = sqlx::query(
+                "UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            )
+            .bind(role)
+            .bind(user_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+
+            if result.rows_affected() == 0 {
+                tx.rollback().await?;
+                return Ok(false);
+            }
+
+            for permission in [UPLOAD_LOCAL_IMAGES, VIEW_ADMIN_STATS, MANAGE_PERMISSIONS] {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO user_permissions (user_id, permission) VALUES (?, ?)",
+                )
+                .bind(user_id.to_string())
+                .bind(permission)
+                .execute(&mut *tx)
+                .await?;
+            }
+
+            tx.commit().await?;
+            return Ok(true);
+        }
+
         let result =
             sqlx::query("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
                 .bind(role)
