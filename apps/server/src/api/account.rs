@@ -8,7 +8,7 @@ use axum::{
 use crate::{
     api::ValidatedJson,
     app_state::AppState,
-    auth::{middleware::RequireCsrf, sessions::AuthenticatedUser},
+    auth::{middleware::RequireCsrf, permissions::effective_role, sessions::AuthenticatedUser},
     services::account::AccountService,
 };
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,8 @@ pub struct UserProfileResponse {
     pub username: Option<String>,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
+    pub role: String,
+    pub is_root_admin: bool,
 }
 
 #[derive(Deserialize, Validate)]
@@ -120,12 +122,15 @@ pub async fn get_profile(
         .get_by_id(user.user_id)
         .await?
         .ok_or_else(|| crate::error::AppError::NotFound)?;
+    let is_root_admin = state.is_root_admin(user.user_id).await?;
 
     Ok(Json(UserProfileResponse {
         id: stored.id.to_string(),
         username: stored.username,
         display_name: stored.display_name,
         avatar_url: stored.avatar_url,
+        role: effective_role(&stored.role, is_root_admin).to_string(),
+        is_root_admin,
     }))
 }
 

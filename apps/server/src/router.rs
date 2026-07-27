@@ -14,6 +14,7 @@ use crate::{
             delete_account, export_account, get_profile, import_account, list_identities, logout,
             unlink_identity, update_username,
         },
+        admin::{list_users, update_permission, update_role},
         buckets::{create_bucket, delete_bucket, list_buckets, rename_bucket},
         gifs::search_gifs,
         images::{
@@ -131,6 +132,15 @@ fn build_router_internal(state: AppState, is_test: bool) -> Router {
         .route(
             "/api/account/identities/{provider}",
             delete(unlink_identity),
+        )
+        .route("/api/admin/users", get(list_users))
+        .route(
+            "/api/admin/users/{user_id}/role",
+            axum::routing::patch(update_role),
+        )
+        .route(
+            "/api/admin/users/{user_id}/permissions",
+            axum::routing::patch(update_permission),
         );
 
     if !is_test {
