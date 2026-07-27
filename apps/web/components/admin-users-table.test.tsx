@@ -106,10 +106,10 @@ vi.mock("@/components/ui/alert-dialog", async () => {
         {children}
       </button>
     ),
-    AlertDialogCancel: ({ children }: { children: React.ReactNode }) => {
+    AlertDialogCancel: ({ children, disabled }: { children: React.ReactNode; disabled?: boolean }) => {
       const context = React.useContext(AlertDialogContext);
       return (
-        <button type="button" onClick={() => context?.onOpenChange?.(false)}>
+        <button type="button" disabled={disabled} onClick={() => context?.onOpenChange?.(false)}>
           {children}
         </button>
       );
@@ -370,5 +370,34 @@ describe("AdminUsersTable", () => {
     expect(screen.getByRole("checkbox", { name: "View admin stats for member" }).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByRole("checkbox", { name: "Manage permissions for member" }).getAttribute("aria-checked")).toBe("false");
     expect(mocks.toastError).toHaveBeenCalledWith("Could not update the user's role.");
+  });
+
+  it("keeps the confirmation open while the role request is pending", async () => {
+    mocks.useUser.mockReturnValue({
+      user: {
+        id: "admin-1",
+        username: "admin",
+        display_name: null,
+        avatar_url: null,
+        role: "admin",
+        is_root_admin: true,
+      },
+      loading: false,
+    });
+    const roleRequest = deferred<void>();
+    mocks.apiPatch.mockReturnValue(roleRequest.promise);
+
+    render(<AdminUsersTable />);
+
+    await screen.findByText("member");
+    await chooseRole("member", "admin");
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(mocks.apiPatch).toHaveBeenCalledWith("/api/admin/users/user-1/role", { role: "admin" }));
+    expect(isDisabled(screen.getByRole("button", { name: "Cancel" }))).toBe(true);
+    expect(screen.getByText("Confirm role change")).toBeTruthy();
+
+    roleRequest.resolve(undefined);
+    await waitFor(() => expect(screen.queryByText("Confirm role change")).toBeNull());
   });
 });

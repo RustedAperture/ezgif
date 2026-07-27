@@ -173,6 +173,10 @@ export function AdminUsersTable() {
     }
   }
 
+  const pendingRoleRequest = pendingRoleChange
+    ? pendingControls.has(`${pendingRoleChange.userId}:role`)
+    : false;
+
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
       <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submitSearch}>
@@ -262,7 +266,10 @@ export function AdminUsersTable() {
         </Table>
       )}
 
-      <AlertDialog open={pendingRoleChange !== null} onOpenChange={(open) => !open && setPendingRoleChange(null)}>
+      <AlertDialog
+        open={pendingRoleChange !== null}
+        onOpenChange={(open) => !open && !pendingRoleRequest && setPendingRoleChange(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm role change</AlertDialogTitle>
@@ -279,7 +286,7 @@ export function AdminUsersTable() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={pendingRoleRequest}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => void confirmRoleChange()}
               disabled={pendingRoleChange ? pendingControls.has(`${pendingRoleChange.userId}:role`) : false}
