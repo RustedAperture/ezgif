@@ -38,6 +38,7 @@ export function AdminUsersTable() {
     const generation = ++requestGeneration.current;
     setLoading(true);
     setError(false);
+    setUsers([]);
     try {
       const search = searchQuery.trim();
       const path = search ? `/api/admin/users?q=${encodeURIComponent(search)}` : "/api/admin/users";

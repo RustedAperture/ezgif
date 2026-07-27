@@ -23,11 +23,13 @@ vi.mock("sonner", () => ({
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
 
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function adminUser(username: string) {
@@ -110,5 +112,29 @@ describe("AdminUsersTable", () => {
     initialRequest.resolve([adminUser("stale result")]);
     await waitFor(() => expect(screen.queryByText("stale result")).toBeNull());
     expect(screen.getByText("newer result")).toBeTruthy();
+  });
+
+  it("clears prior results when the latest submitted search fails", async () => {
+    const initialRequest = deferred<ReturnType<typeof adminUser>[]>();
+    const searchRequest = deferred<ReturnType<typeof adminUser>[]>();
+    mocks.apiGet
+      .mockImplementationOnce(() => initialRequest.promise)
+      .mockImplementationOnce(() => searchRequest.promise);
+
+    render(<AdminUsersTable />);
+
+    await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledWith("/api/admin/users"));
+    initialRequest.resolve([adminUser("prior result")]);
+    expect(await screen.findByText("prior result")).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), { target: { value: "missing" } });
+    fireEvent.submit(screen.getByRole("textbox", { name: "Search users" }).closest("form")!);
+    await waitFor(() => expect(mocks.apiGet).toHaveBeenLastCalledWith("/api/admin/users?q=missing"));
+
+    searchRequest.reject(new Error("request failed"));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Could not load users. Try again.");
+    await waitFor(() => expect(screen.queryByText("prior result")).toBeNull());
+    expect(screen.getByText("No users found.")).toBeTruthy();
   });
 });
