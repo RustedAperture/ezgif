@@ -89,7 +89,12 @@ vi.mock("@/components/ui/alert-dialog", async () => {
       children: React.ReactNode;
     }) => (
       <AlertDialogContext.Provider value={{ onOpenChange }}>
-        {open ? <div>{children}</div> : null}
+        {open ? (
+          <div>
+            <button type="button" aria-label="Dismiss role confirmation" onClick={() => onOpenChange?.(false)} />
+            {children}
+          </div>
+        ) : null}
       </AlertDialogContext.Provider>
     ),
     AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -395,6 +400,7 @@ describe("AdminUsersTable", () => {
 
     await waitFor(() => expect(mocks.apiPatch).toHaveBeenCalledWith("/api/admin/users/user-1/role", { role: "admin" }));
     expect(isDisabled(screen.getByRole("button", { name: "Cancel" }))).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss role confirmation" }));
     expect(screen.getByText("Confirm role change")).toBeTruthy();
 
     roleRequest.resolve(undefined);
