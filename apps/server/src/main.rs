@@ -79,6 +79,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = build_router(
         AppState::new(pool)
+            .with_root_admin_config(config.root_admin_config)
             .with_session_secret(config.session_secret)
             .with_discord_public_key(config.discord_public_key)
             .with_discord_bot_token(config.discord_bot_token)

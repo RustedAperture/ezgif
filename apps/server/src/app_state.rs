@@ -6,6 +6,7 @@ use crate::repositories::{
     users::{UserRepo, UserRepository},
 };
 use crate::services::storage::StorageService;
+use crate::{auth::permissions, config::RootAdminConfig};
 use sqlx::SqlitePool;
 use std::{
     collections::HashMap,
@@ -38,6 +39,7 @@ pub struct AppState {
     telegram_bot_token: String,
     telegram_bot_username: String,
     pub storage: Option<Arc<StorageService>>,
+    root_admin_config: RootAdminConfig,
 }
 
 impl AppState {
@@ -68,6 +70,7 @@ impl AppState {
             telegram_bot_token: String::new(),
             telegram_bot_username: String::new(),
             storage: None,
+            root_admin_config: RootAdminConfig::default(),
         }
     }
 
@@ -78,6 +81,15 @@ impl AppState {
     pub fn with_static_dir(mut self, dir: PathBuf) -> Self {
         self.static_dir = dir;
         self
+    }
+
+    pub fn with_root_admin_config(mut self, config: RootAdminConfig) -> Self {
+        self.root_admin_config = config;
+        self
+    }
+
+    pub async fn is_root_admin(&self, user_id: uuid::Uuid) -> Result<bool, sqlx::Error> {
+        permissions::is_root_admin(self.user_repo.as_ref(), &self.root_admin_config, user_id).await
     }
 
     pub fn with_session_secret(mut self, secret: String) -> Self {

@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     app_state::AppState,
+    auth::permissions::effective_role,
     auth::sessions::{
         AuthenticatedUser, lookup_session, lookup_session_info, read_session_cookie,
         verify_csrf_token,
@@ -50,6 +51,7 @@ impl FromRequestParts<AppState> for OptionalUser {
 
 pub struct AdminUser {
     pub user_id: Uuid,
+    pub is_root_admin: bool,
 }
 
 impl FromRequestParts<AppState> for AdminUser {
@@ -63,12 +65,18 @@ impl FromRequestParts<AppState> for AdminUser {
             .await
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-        if user.role != "admin" {
+        let is_root_admin = state
+            .is_root_admin(user.user_id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        if effective_role(&user.role, is_root_admin) != "admin" {
             return Err(StatusCode::FORBIDDEN);
         }
 
         Ok(AdminUser {
             user_id: user.user_id,
+            is_root_admin,
         })
     }
 }

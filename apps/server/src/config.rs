@@ -1,8 +1,51 @@
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::{env, fs, net::SocketAddr, path::PathBuf};
 
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
+
+#[derive(Clone, Debug, Default)]
+pub struct RootAdminConfig {
+    configured_identities: HashSet<String>,
+}
+
+impl RootAdminConfig {
+    pub fn parse(raw: &str) -> anyhow::Result<Self> {
+        let mut configured_identities = HashSet::new();
+
+        for entry in raw.split(',') {
+            let entry = entry.trim();
+            let (provider, provider_user_id) = entry
+                .split_once(':')
+                .ok_or_else(|| anyhow::anyhow!("root admin entry must include a provider"))?;
+            let provider = provider.trim();
+            let provider_user_id = provider_user_id.trim();
+
+            if provider_user_id.is_empty() {
+                return Err(anyhow::anyhow!("root admin entry must include an ID"));
+            }
+            if !matches!(provider, "discord" | "telegram") {
+                return Err(anyhow::anyhow!("root admin provider is not supported"));
+            }
+
+            configured_identities.insert(format!("{provider}:{provider_user_id}"));
+        }
+
+        if configured_identities.is_empty() {
+            return Err(anyhow::anyhow!("at least one root admin is required"));
+        }
+
+        Ok(Self {
+            configured_identities,
+        })
+    }
+
+    pub fn is_configured_identity(&self, provider: &str, provider_user_id: &str) -> bool {
+        self.configured_identities
+            .contains(&format!("{provider}:{provider_user_id}"))
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -21,6 +64,7 @@ pub struct Config {
     pub b2_bucket_name: Option<String>,
     pub b2_endpoint: Option<String>,
     pub cdn_base_url: Option<String>,
+    pub root_admin_config: RootAdminConfig,
 }
 
 impl Config {
@@ -34,6 +78,7 @@ impl Config {
         let discord_bot_token = env::var("DISCORD_BOT_TOKEN").unwrap_or_default();
         let discord_public_key = env::var("DISCORD_PUBLIC_KEY").unwrap_or_default();
         let session_secret = required_env("SESSION_SECRET")?;
+        let root_admin_config = RootAdminConfig::parse(&required_env("ADMIN_PROVIDER_IDS")?)?;
         let klipy_api_key = env::var("KLIPY_API_KEY").ok().filter(|v| !v.is_empty());
         let telegram_bot_token = env::var("TELEGRAM_BOT_TOKEN")
             .ok()
@@ -66,6 +111,7 @@ impl Config {
             b2_bucket_name,
             b2_endpoint,
             cdn_base_url,
+            root_admin_config,
         })
     }
 }
@@ -135,20 +181,79 @@ fn sqlite_file_path(database_url: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, connect_sqlite_pool};
+    use super::{Config, RootAdminConfig, connect_sqlite_pool};
+    use crate::{app_state::AppState, auth::permissions::normalize_role};
+    use sqlx::SqlitePool;
     use std::fs;
     use tokio::sync::Mutex;
 
     static CWD_LOCK: Mutex<()> = Mutex::const_new(());
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
+
+    #[test]
+    fn parses_provider_qualified_root_ids() {
+        let config = RootAdminConfig::parse("discord:123,telegram:456").unwrap();
+
+        assert!(config.is_configured_identity("discord", "123"));
+        assert!(config.is_configured_identity("telegram", "456"));
+    }
+
+    #[test]
+    fn rejects_missing_provider_or_id() {
+        assert!(RootAdminConfig::parse("discord:").is_err());
+        assert!(RootAdminConfig::parse(":123").is_err());
+        assert!(RootAdminConfig::parse("matrix:123").is_err());
+    }
+
+    #[test]
+    fn unknown_roles_normalize_to_user() {
+        assert_eq!(normalize_role("admin"), "admin");
+        assert_eq!(normalize_role("owner"), "user");
+        assert_eq!(normalize_role(""), "user");
+    }
+
+    #[tokio::test]
+    async fn config_requires_admin_provider_ids() {
+        let _env_lock = ENV_LOCK.lock().await;
+        let old_session_secret = std::env::var("SESSION_SECRET").ok();
+        let old_admin_provider_ids = std::env::var("ADMIN_PROVIDER_IDS").ok();
+        unsafe {
+            std::env::set_var("SESSION_SECRET", "test-session-secret");
+            std::env::remove_var("ADMIN_PROVIDER_IDS");
+        }
+
+        let result = Config::from_env();
+
+        match old_session_secret {
+            Some(value) => unsafe { std::env::set_var("SESSION_SECRET", value) },
+            None => unsafe { std::env::remove_var("SESSION_SECRET") },
+        }
+        match old_admin_provider_ids {
+            Some(value) => unsafe { std::env::set_var("ADMIN_PROVIDER_IDS", value) },
+            None => unsafe { std::env::remove_var("ADMIN_PROVIDER_IDS") },
+        }
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_app_state_uses_empty_root_admin_configuration() {
+        let pool = SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+
+        let _state = AppState::for_tests(pool);
+    }
 
     #[tokio::test]
     async fn config_defaults_to_repo_local_sqlite_path() {
         let _cwd_lock = CWD_LOCK.lock().await;
+        let _env_lock = ENV_LOCK.lock().await;
         let old_discord_public_key = std::env::var("DISCORD_PUBLIC_KEY").ok();
         let old_session_secret = std::env::var("SESSION_SECRET").ok();
+        let old_admin_provider_ids = std::env::var("ADMIN_PROVIDER_IDS").ok();
         unsafe {
             std::env::remove_var("DISCORD_PUBLIC_KEY");
             std::env::set_var("SESSION_SECRET", "test-session-secret");
+            std::env::set_var("ADMIN_PROVIDER_IDS", "discord:123");
         }
 
         let config = Config::from_env().unwrap();
@@ -167,6 +272,14 @@ mod tests {
             },
             None => unsafe {
                 std::env::remove_var("SESSION_SECRET");
+            },
+        }
+        match old_admin_provider_ids {
+            Some(value) => unsafe {
+                std::env::set_var("ADMIN_PROVIDER_IDS", value);
+            },
+            None => unsafe {
+                std::env::remove_var("ADMIN_PROVIDER_IDS");
             },
         }
 
