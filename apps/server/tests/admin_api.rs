@@ -1,13 +1,38 @@
 use memebucket_server::repositories::{
-    admin::AdminRepository,
-    users::{UserRepo, UserRepository},
+    admin::{AdminRepository, AdminUserRecord},
+    users::{StoredIdentity, UserRepo, UserRepository},
 };
 use sqlx::SqlitePool;
+use std::collections::HashSet;
+use uuid::Uuid;
 
 async fn test_pool() -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     pool
+}
+
+#[test]
+fn admin_user_debug_output_redacts_provider_ids() {
+    let provider_user_id = "discord-provider-id-9876543210";
+    let record = AdminUserRecord {
+        id: Uuid::new_v4(),
+        username: Some("admin".to_string()),
+        display_name: Some("Admin".to_string()),
+        role: "admin".to_string(),
+        identities: vec![StoredIdentity {
+            id: Uuid::new_v4(),
+            provider: "discord".to_string(),
+            provider_user_id: provider_user_id.to_string(),
+            display_name: None,
+            avatar_url: None,
+        }],
+        permissions: HashSet::new(),
+    };
+
+    let debug_output = format!("{record:?}");
+
+    assert!(!debug_output.contains(provider_user_id));
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fmt};
 
 use sqlx::SqlitePool;
 use uuid::Uuid;
@@ -12,7 +12,7 @@ pub struct AdminRepository {
     pool: SqlitePool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AdminUserRecord {
     pub id: Uuid,
     pub username: Option<String>,
@@ -20,6 +20,20 @@ pub struct AdminUserRecord {
     pub role: String,
     pub identities: Vec<StoredIdentity>,
     pub permissions: HashSet<String>,
+}
+
+impl fmt::Debug for AdminUserRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AdminUserRecord")
+            .field("id", &self.id)
+            .field("username", &self.username)
+            .field("display_name", &self.display_name)
+            .field("role", &self.role)
+            .field("identity_count", &self.identities.len())
+            .field("permissions", &self.permissions)
+            .finish()
+    }
 }
 
 impl AdminRepository {
