@@ -96,6 +96,21 @@ impl AppState {
         permissions::is_root_admin(self.user_repo.as_ref(), &self.root_admin_config, user_id).await
     }
 
+    pub async fn is_configured_root_identity(
+        &self,
+        user_id: uuid::Uuid,
+        provider: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let identities = self.user_repo.get_identities(user_id).await?;
+
+        Ok(identities.into_iter().any(|identity| {
+            identity.provider == provider
+                && self
+                    .root_admin_config
+                    .is_configured_identity(&identity.provider, &identity.provider_user_id)
+        }))
+    }
+
     pub fn with_session_secret(mut self, secret: String) -> Self {
         self.session_secret = secret;
         self

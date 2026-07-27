@@ -184,6 +184,13 @@ pub async fn unlink_identity(
     _csrf: RequireCsrf,
     Path(provider): Path<String>,
 ) -> Result<impl IntoResponse, crate::error::AppError> {
+    if state
+        .is_configured_root_identity(user.user_id, &provider)
+        .await?
+    {
+        return Err(crate::error::AppError::Forbidden);
+    }
+
     let count = state.user_repo.count_identities(user.user_id).await?;
     if count <= 1 {
         return Ok((

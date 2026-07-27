@@ -7,7 +7,7 @@ use axum::{
 use http_body_util::BodyExt;
 use memebucket_server::{
     app_state::AppState,
-    auth::sessions::AuthenticatedUser,
+    auth::sessions::{AuthenticatedUser, create_session},
     config::RootAdminConfig,
     repositories::{
         admin::{AdminRepository, AdminUserRecord},
@@ -19,6 +19,9 @@ use sqlx::SqlitePool;
 use std::collections::HashSet;
 use tower::ServiceExt;
 use uuid::Uuid;
+
+const ROOT_PROVIDER_ID: &str = "root-provider-id-0000";
+const TEST_SESSION_SECRET: &str = "admin-api-test-session-secret";
 
 async fn test_pool() -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -137,10 +140,9 @@ struct AdminFixture {
 async fn admin_fixture() -> AdminFixture {
     let pool = test_pool().await;
     let users = UserRepository::new(pool.clone());
-    let root_provider_id = "root-provider-id-0000";
     let full_provider_id = "search-provider-id-1234".to_string();
     let root = users
-        .upsert_by_provider("discord", root_provider_id, Some("Root"), None)
+        .upsert_by_provider("discord", ROOT_PROVIDER_ID, Some("Root"), None)
         .await
         .unwrap();
     let normal_admin = users
@@ -176,9 +178,11 @@ async fn admin_fixture() -> AdminFixture {
         .unwrap();
     let normal_admin = users.get_by_id(normal_admin.id).await.unwrap().unwrap();
 
-    let state = AppState::for_tests(pool.clone()).with_root_admin_config(
-        RootAdminConfig::parse(&format!("discord:{root_provider_id}")).unwrap(),
-    );
+    let state = AppState::for_tests(pool.clone())
+        .with_root_admin_config(
+            RootAdminConfig::parse(&format!("discord:{ROOT_PROVIDER_ID}")).unwrap(),
+        )
+        .with_session_secret(TEST_SESSION_SECRET.to_string());
 
     AdminFixture {
         app: build_router_for_tests(state),
@@ -254,6 +258,26 @@ async fn patch_permission(
 async fn json_body(response: Response) -> serde_json::Value {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&body).unwrap()
+}
+
+async fn unlink_identity(
+    app: &Router,
+    session_id: Uuid,
+    csrf_token: &str,
+    provider: &str,
+) -> Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/account/identities/{provider}"))
+                .header("cookie", format!("session={session_id}"))
+                .header("X-CSRF-Token", csrf_token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -421,5 +445,86 @@ async fn admin_updates_return_not_found_for_missing_target() {
         .await
         .status(),
         StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn configured_root_identity_cannot_be_unlinked() {
+    let fixture = admin_fixture().await;
+    let users = UserRepository::new(fixture.pool.clone());
+    users
+        .link_identity(
+            fixture.root.id,
+            "telegram",
+            "root-secondary-id-5678",
+            Some("Root"),
+            None,
+        )
+        .await
+        .unwrap();
+    let (session_id, csrf_token) =
+        create_session(&fixture.pool, fixture.root.id, TEST_SESSION_SECRET)
+            .await
+            .unwrap();
+
+    let response = unlink_identity(&fixture.app, session_id, &csrf_token, "discord").await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(
+        users
+            .get_identities(fixture.root.id)
+            .await
+            .unwrap()
+            .iter()
+            .any(|identity| {
+                identity.provider == "discord" && identity.provider_user_id == ROOT_PROVIDER_ID
+            })
+    );
+}
+
+#[tokio::test]
+async fn non_root_users_can_unlink_a_secondary_identity_but_not_the_last_one() {
+    let fixture = admin_fixture().await;
+    let users = UserRepository::new(fixture.pool.clone());
+    users
+        .link_identity(
+            fixture.normal_user.id,
+            "telegram",
+            "normal-user-secondary-5678",
+            Some("User"),
+            None,
+        )
+        .await
+        .unwrap();
+    let (session_id, csrf_token) =
+        create_session(&fixture.pool, fixture.normal_user.id, TEST_SESSION_SECRET)
+            .await
+            .unwrap();
+
+    assert_eq!(
+        unlink_identity(&fixture.app, session_id, &csrf_token, "discord")
+            .await
+            .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        users
+            .count_identities(fixture.normal_user.id)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        unlink_identity(&fixture.app, session_id, &csrf_token, "telegram")
+            .await
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        users
+            .count_identities(fixture.normal_user.id)
+            .await
+            .unwrap(),
+        1
     );
 }
