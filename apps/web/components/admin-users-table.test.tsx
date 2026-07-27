@@ -107,6 +107,7 @@ describe("AdminUsersTable", () => {
 
     for (const permission of ["Upload local images", "View admin stats", "Manage permissions"]) {
       const checkbox = screen.getByRole("checkbox", { name: permission + " for member" });
+      expect(checkbox.className).toContain("mx-auto");
       expect(checkbox.closest("td")?.className).toContain("text-center");
     }
   });
