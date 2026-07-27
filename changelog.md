@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added an Admin Users page with configured provider-ID root admins, fail-closed role and permission defaults, and per-user permission grants.
+
 ## v0.2.10 - Jul 17, 2026
 
 ### Added

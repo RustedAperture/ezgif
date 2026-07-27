@@ -1,5 +1,17 @@
 [
   {
+    "version": "Unreleased",
+    "date": "Jul 27, 2026",
+    "sections": [
+      {
+        "heading": "Added",
+        "items": [
+          "Added an Admin Users page with configured provider-ID root admins, fail-closed role and permission defaults, and per-user permission grants."
+        ]
+      }
+    ]
+  },
+  {
     "version": "0.2.10",
     "date": "Jul 17, 2026",
     "sections": [
