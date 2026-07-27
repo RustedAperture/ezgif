@@ -3,6 +3,29 @@ export type User = {
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  role: "admin" | "user";
+  is_root_admin: boolean;
+};
+
+export type AdminIdentity = {
+  provider: string;
+  masked_id: string;
+};
+
+export type AdminPermissions = {
+  upload_local_images: boolean;
+  view_admin_stats: boolean;
+  manage_permissions: boolean;
+};
+
+export type AdminUser = {
+  id: string;
+  username: string | null;
+  display_name: string | null;
+  role: "admin" | "user";
+  is_root_admin: boolean;
+  identities: AdminIdentity[];
+  permissions: AdminPermissions;
 };
 
 export type CategorySummary = {

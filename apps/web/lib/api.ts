@@ -67,6 +67,10 @@ export async function apiPatch<TRequest, TResponse>(path: string, body: TRequest
     throw new Error(await response.text());
   }
 
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    return undefined as TResponse;
+  }
+
   return response.json() as Promise<TResponse>;
 }
 
