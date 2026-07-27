@@ -6,7 +6,8 @@
       {
         "heading": "Added",
         "items": [
-          "Added an Admin Users page with configured provider-ID root admins, fail-closed role and permission defaults, and per-user permission grants."
+          "Added an Admin Users page with configured provider-ID root admins, fail-closed role and permission defaults, and per-user permission grants.",
+          "Promoting a user to Admin now requires confirmation and grants all current permissions, which can then be individually removed."
         ]
       }
     ]

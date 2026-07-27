@@ -5,6 +5,7 @@
 ### Added
 
 - Added an Admin Users page with configured provider-ID root admins, fail-closed role and permission defaults, and per-user permission grants.
+- Promoting a user to Admin now requires confirmation and grants all current permissions, which can then be individually removed.
 
 ## v0.2.10 - Jul 17, 2026
 
