@@ -5,6 +5,8 @@ use std::{env, fs, net::SocketAddr, path::PathBuf};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 
+use crate::domain::user_key::DiscordUserKey;
+
 #[derive(Clone, Default)]
 pub struct RootAdminConfig {
     configured_identities: HashSet<String>,
@@ -24,6 +26,26 @@ impl std::fmt::Debug for RootAdminConfig {
 
 impl RootAdminConfig {
     pub fn parse(raw: &str) -> anyhow::Result<Self> {
+        Self::parse_with_transform(raw, |provider, provider_user_id| {
+            format!("{provider}:{provider_user_id}")
+        })
+    }
+
+    pub fn parse_with_discord_secret(raw: &str, discord_secret: &str) -> anyhow::Result<Self> {
+        Self::parse_with_transform(raw, |provider, provider_user_id| {
+            if provider == "discord" {
+                let user_key = DiscordUserKey::derive(discord_secret.as_bytes(), provider_user_id);
+                format!("discord:{}", user_key.as_hex())
+            } else {
+                format!("{provider}:{provider_user_id}")
+            }
+        })
+    }
+
+    fn parse_with_transform<F>(raw: &str, mut transform: F) -> anyhow::Result<Self>
+    where
+        F: FnMut(&str, &str) -> String,
+    {
         let mut configured_identities = HashSet::new();
 
         for entry in raw.split(',') {
@@ -41,7 +63,7 @@ impl RootAdminConfig {
                 return Err(anyhow::anyhow!("root admin provider is not supported"));
             }
 
-            configured_identities.insert(format!("{provider}:{provider_user_id}"));
+            configured_identities.insert(transform(provider, provider_user_id));
         }
 
         if configured_identities.is_empty() {
@@ -90,7 +112,11 @@ impl Config {
         let discord_bot_token = env::var("DISCORD_BOT_TOKEN").unwrap_or_default();
         let discord_public_key = env::var("DISCORD_PUBLIC_KEY").unwrap_or_default();
         let session_secret = required_env("SESSION_SECRET")?;
-        let root_admin_config = RootAdminConfig::parse(&required_env("ADMIN_PROVIDER_IDS")?)?;
+        let app_user_key_secret = required_env("APP_USER_KEY_SECRET")?;
+        let root_admin_config = RootAdminConfig::parse_with_discord_secret(
+            &required_env("ADMIN_PROVIDER_IDS")?,
+            &app_user_key_secret,
+        )?;
         let klipy_api_key = env::var("KLIPY_API_KEY").ok().filter(|v| !v.is_empty());
         let telegram_bot_token = env::var("TELEGRAM_BOT_TOKEN")
             .ok()
@@ -194,7 +220,9 @@ fn sqlite_file_path(database_url: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{Config, RootAdminConfig, connect_sqlite_pool};
-    use crate::{app_state::AppState, auth::permissions::normalize_role};
+    use crate::{
+        app_state::AppState, auth::permissions::normalize_role, domain::user_key::DiscordUserKey,
+    };
     use sqlx::SqlitePool;
     use std::fs;
     use tokio::sync::Mutex;
@@ -236,8 +264,10 @@ mod tests {
         let _env_lock = ENV_LOCK.lock().await;
         let old_session_secret = std::env::var("SESSION_SECRET").ok();
         let old_admin_provider_ids = std::env::var("ADMIN_PROVIDER_IDS").ok();
+        let old_app_user_key_secret = std::env::var("APP_USER_KEY_SECRET").ok();
         unsafe {
             std::env::set_var("SESSION_SECRET", "test-session-secret");
+            std::env::set_var("APP_USER_KEY_SECRET", "test-user-key-secret");
             std::env::remove_var("ADMIN_PROVIDER_IDS");
         }
 
@@ -250,6 +280,10 @@ mod tests {
         match old_admin_provider_ids {
             Some(value) => unsafe { std::env::set_var("ADMIN_PROVIDER_IDS", value) },
             None => unsafe { std::env::remove_var("ADMIN_PROVIDER_IDS") },
+        }
+        match old_app_user_key_secret {
+            Some(value) => unsafe { std::env::set_var("APP_USER_KEY_SECRET", value) },
+            None => unsafe { std::env::remove_var("APP_USER_KEY_SECRET") },
         }
 
         assert!(result.is_err());
@@ -269,10 +303,12 @@ mod tests {
         let old_discord_public_key = std::env::var("DISCORD_PUBLIC_KEY").ok();
         let old_session_secret = std::env::var("SESSION_SECRET").ok();
         let old_admin_provider_ids = std::env::var("ADMIN_PROVIDER_IDS").ok();
+        let old_app_user_key_secret = std::env::var("APP_USER_KEY_SECRET").ok();
         unsafe {
             std::env::remove_var("DISCORD_PUBLIC_KEY");
             std::env::set_var("SESSION_SECRET", "test-session-secret");
             std::env::set_var("ADMIN_PROVIDER_IDS", "discord:123");
+            std::env::set_var("APP_USER_KEY_SECRET", "test-user-key-secret");
         }
 
         let config = Config::from_env().unwrap();
@@ -301,10 +337,53 @@ mod tests {
                 std::env::remove_var("ADMIN_PROVIDER_IDS");
             },
         }
+        match old_app_user_key_secret {
+            Some(value) => unsafe {
+                std::env::set_var("APP_USER_KEY_SECRET", value);
+            },
+            None => unsafe {
+                std::env::remove_var("APP_USER_KEY_SECRET");
+            },
+        }
 
         assert_eq!(config.database_url, "sqlite://data/app.db");
         assert_eq!(config.discord_public_key, "");
         assert_eq!(config.session_secret, "test-session-secret");
+    }
+
+    #[tokio::test]
+    async fn config_normalizes_discord_root_id_for_stored_user_key() {
+        let _env_lock = ENV_LOCK.lock().await;
+        let old_session_secret = std::env::var("SESSION_SECRET").ok();
+        let old_admin_provider_ids = std::env::var("ADMIN_PROVIDER_IDS").ok();
+        let old_app_user_key_secret = std::env::var("APP_USER_KEY_SECRET").ok();
+        unsafe {
+            std::env::set_var("SESSION_SECRET", "test-session-secret");
+            std::env::set_var("ADMIN_PROVIDER_IDS", "discord:123456789");
+            std::env::set_var("APP_USER_KEY_SECRET", "test-user-key-secret");
+        }
+
+        let config = Config::from_env().unwrap();
+        let stored_provider_id = DiscordUserKey::derive(b"test-user-key-secret", "123456789");
+
+        assert!(
+            config
+                .root_admin_config
+                .is_configured_identity("discord", stored_provider_id.as_hex())
+        );
+
+        match old_session_secret {
+            Some(value) => unsafe { std::env::set_var("SESSION_SECRET", value) },
+            None => unsafe { std::env::remove_var("SESSION_SECRET") },
+        }
+        match old_admin_provider_ids {
+            Some(value) => unsafe { std::env::set_var("ADMIN_PROVIDER_IDS", value) },
+            None => unsafe { std::env::remove_var("ADMIN_PROVIDER_IDS") },
+        }
+        match old_app_user_key_secret {
+            Some(value) => unsafe { std::env::set_var("APP_USER_KEY_SECRET", value) },
+            None => unsafe { std::env::remove_var("APP_USER_KEY_SECRET") },
+        }
     }
 
     #[tokio::test]
