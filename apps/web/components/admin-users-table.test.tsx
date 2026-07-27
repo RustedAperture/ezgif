@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminUsersTable } from "@/components/admin-users-table";
 
 const mocks = vi.hoisted(() => ({
@@ -21,7 +21,34 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn() },
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+
+  return { promise, resolve };
+}
+
+function adminUser(username: string) {
+  return {
+    id: `${username}-id`,
+    username,
+    display_name: null,
+    role: "user" as const,
+    is_root_admin: false,
+    identities: [{ provider: "discord", masked_id: "discord:****1234" }],
+    permissions: {
+      upload_local_images: false,
+      view_admin_stats: false,
+      manage_permissions: false,
+    },
+  };
+}
+
 describe("AdminUsersTable", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     mocks.useUser.mockReturnValue({
       user: {
@@ -61,5 +88,27 @@ describe("AdminUsersTable", () => {
     expect(screen.getByRole("checkbox", { name: "Upload local images for member" }).hasAttribute("disabled")).toBe(false);
     expect(screen.getByRole("checkbox", { name: "View admin stats for member" }).hasAttribute("disabled")).toBe(false);
     expect(screen.getByRole("checkbox", { name: "Manage permissions for member" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("keeps the most recently submitted search results when an older request settles later", async () => {
+    const initialRequest = deferred<ReturnType<typeof adminUser>[]>();
+    const searchRequest = deferred<ReturnType<typeof adminUser>[]>();
+    mocks.apiGet
+      .mockImplementationOnce(() => initialRequest.promise)
+      .mockImplementationOnce(() => searchRequest.promise);
+
+    render(<AdminUsersTable />);
+
+    await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledWith("/api/admin/users"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), { target: { value: "newer" } });
+    fireEvent.submit(screen.getByRole("textbox", { name: "Search users" }).closest("form")!);
+    await waitFor(() => expect(mocks.apiGet).toHaveBeenLastCalledWith("/api/admin/users?q=newer"));
+
+    searchRequest.resolve([adminUser("newer result")]);
+    expect(await screen.findByText("newer result")).toBeTruthy();
+
+    initialRequest.resolve([adminUser("stale result")]);
+    await waitFor(() => expect(screen.queryByText("stale result")).toBeNull());
+    expect(screen.getByText("newer result")).toBeTruthy();
   });
 });

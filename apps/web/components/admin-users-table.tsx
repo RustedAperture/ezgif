@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { apiGet, apiPatch } from "@/lib/api";
 import type { AdminPermissions, AdminUser } from "@/lib/types";
@@ -32,18 +32,21 @@ export function AdminUsersTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [pendingControls, setPendingControls] = useState<Set<string>>(new Set());
+  const requestGeneration = useRef(0);
 
   const loadUsers = useCallback(async (searchQuery: string) => {
+    const generation = ++requestGeneration.current;
     setLoading(true);
     setError(false);
     try {
       const search = searchQuery.trim();
       const path = search ? `/api/admin/users?q=${encodeURIComponent(search)}` : "/api/admin/users";
-      setUsers(await apiGet<AdminUser[]>(path));
+      const response = await apiGet<AdminUser[]>(path);
+      if (generation === requestGeneration.current) setUsers(response);
     } catch {
-      setError(true);
+      if (generation === requestGeneration.current) setError(true);
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) setLoading(false);
     }
   }, []);
 
