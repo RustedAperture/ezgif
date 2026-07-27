@@ -109,6 +109,7 @@ describe("AdminUsersTable", () => {
       const checkbox = screen.getByRole("checkbox", { name: permission + " for member" });
       expect(checkbox.className).toContain("mx-auto");
       expect(checkbox.closest("td")?.className).toContain("text-center");
+      expect(checkbox.closest("td")?.className).toContain("pr-3");
     }
   });
 

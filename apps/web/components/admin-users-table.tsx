@@ -196,7 +196,7 @@ export function AdminUsersTable() {
                     const control = `${target.id}:${permission}`;
                     const disabled = pendingControls.has(control) || (permission === "manage_permissions" && !isRootAdmin);
                     return (
-                      <TableCell key={permission} className="text-center">
+                      <TableCell key={permission} className="pr-3 text-center">
                         <Checkbox className="mx-auto"
                           aria-label={`${permissionLabels[permission]} for ${label}`}
                           checked={target.permissions[permission]}
