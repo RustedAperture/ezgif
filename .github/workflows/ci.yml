@@ -58,10 +58,7 @@ jobs:
         uses: taiki-e/install-action@cargo-audit
         
       - name: Run cargo-audit (Rust SCA / Vulnerability check)
-        # RUSTSEC-2026-0194/0195 (quick-xml, via object_store's pinned dependency): no object_store
-        # release yet pulls a patched quick-xml (0.14.0 is latest, still on quick-xml 0.37.5).
-        # Remove these two ignores once object_store ships a version requiring quick-xml >=0.41.0.
-        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+        run: cargo audit
 
       # --- TypeScript Setup ---
       - name: Setup Node.js
