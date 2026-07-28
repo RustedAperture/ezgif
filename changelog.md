@@ -6,6 +6,7 @@
 
 - Added an Admin Users page with configured provider-ID root admins, fail-closed role and permission defaults, and per-user permission grants.
 - Promoting a user to Admin now requires confirmation and grants all current permissions, which can then be individually removed.
+- Added permissioned bucket image uploads: users with upload permission can drag and drop or choose image files for owned buckets, and queued drag-and-drop processing converts each upload to WebP and uses content-addressed B2 deduplication so later files keep processing even if one fails.
 
 ## v0.2.10 - Jul 17, 2026
 
