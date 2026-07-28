@@ -50,10 +50,45 @@ impl AdminRepository {
         query: Option<&str>,
         limit: i64,
     ) -> Result<Vec<AdminUserRecord>, sqlx::Error> {
+        self.search_users_with_discord_key(query, None, limit).await
+    }
+
+    pub async fn search_users_with_discord_key(
+        &self,
+        query: Option<&str>,
+        discord_key: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<AdminUserRecord>, sqlx::Error> {
         let limit = limit.clamp(1, 50);
         let query = query.map(str::trim).filter(|query| !query.is_empty());
-        let rows: Vec<(String, Option<String>, Option<String>, String)> = match query {
-            Some(query) => {
+        let discord_key = discord_key.map(str::trim).filter(|key| !key.is_empty());
+        let rows: Vec<(String, Option<String>, Option<String>, String)> = match (query, discord_key)
+        {
+            (Some(query), Some(discord_key)) => {
+                let pattern = format!("%{query}%");
+                let discord_pattern = format!("%{discord_key}%");
+                sqlx::query_as(
+                    "SELECT id, username, display_name, role
+                     FROM users
+                     WHERE username LIKE ?
+                        OR EXISTS (
+                            SELECT 1
+                            FROM user_identities
+                            WHERE user_identities.user_id = users.id
+                              AND ((provider || ':' || provider_user_id) LIKE ?
+                                   OR (provider = 'discord' AND provider_user_id LIKE ?))
+                        )
+                     ORDER BY username, display_name, id
+                     LIMIT ?",
+                )
+                .bind(&pattern)
+                .bind(&pattern)
+                .bind(&discord_pattern)
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (Some(query), None) => {
                 let pattern = format!("%{query}%");
                 sqlx::query_as(
                     "SELECT id, username, display_name, role
@@ -74,7 +109,7 @@ impl AdminRepository {
                 .fetch_all(&self.pool)
                 .await?
             }
-            None => {
+            (None, _) => {
                 sqlx::query_as(
                     "SELECT id, username, display_name, role
                      FROM users

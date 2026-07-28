@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::{
     app_state::AppState,
     auth::{middleware::AdminUser, permissions::effective_role},
+    domain::user_key::DiscordUserKey,
     error::AppError,
     repositories::admin::AdminUserRecord,
 };
@@ -79,9 +80,13 @@ pub async fn list_users(
     _admin: AdminUser,
     Query(query): Query<AdminUsersQuery>,
 ) -> Result<Json<Vec<AdminUserResponse>>, AppError> {
+    let discord_search_key = query
+        .q
+        .as_deref()
+        .and_then(|value| raw_discord_search_key(value, state.app_user_key_secret()));
     let users = state
         .admin_repo
-        .search_users(query.q.as_deref(), 50)
+        .search_users_with_discord_key(query.q.as_deref(), discord_search_key.as_deref(), 50)
         .await?;
     let mut response = Vec::with_capacity(users.len());
 
@@ -91,6 +96,23 @@ pub async fn list_users(
     }
 
     Ok(Json(response))
+}
+
+fn raw_discord_search_key(query: &str, secret: &str) -> Option<String> {
+    let query = query.trim();
+    let raw_id = query.strip_prefix("discord:").unwrap_or(query);
+    let is_discord_query = query.starts_with("discord:")
+        || (!raw_id.is_empty() && raw_id.chars().all(|character| character.is_ascii_digit()));
+
+    if !is_discord_query || secret.is_empty() {
+        return None;
+    }
+
+    Some(
+        DiscordUserKey::derive(secret.as_bytes(), raw_id)
+            .as_hex()
+            .to_string(),
+    )
 }
 
 pub async fn update_role(

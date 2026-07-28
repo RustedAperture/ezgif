@@ -32,6 +32,7 @@ pub struct AppState {
     pub send_history_repo: Arc<dyn SendHistoryRepo>,
     pub static_dir: PathBuf,
     pub session_secret: String,
+    app_user_key_secret: String,
     discord_public_key: String,
     discord_bot_token: String,
     pub klipy_api_key: Option<String>,
@@ -65,6 +66,7 @@ impl AppState {
             send_history_repo,
             static_dir: PathBuf::from("apps/web/out"),
             session_secret: String::new(),
+            app_user_key_secret: String::new(),
             discord_public_key: String::new(),
             discord_bot_token: String::new(),
             klipy_api_key: None,
@@ -118,6 +120,15 @@ impl AppState {
 
     pub fn session_secret(&self) -> &str {
         &self.session_secret
+    }
+
+    pub fn with_app_user_key_secret(mut self, secret: String) -> Self {
+        self.app_user_key_secret = secret;
+        self
+    }
+
+    pub fn app_user_key_secret(&self) -> &str {
+        &self.app_user_key_secret
     }
 
     pub fn with_discord_public_key(mut self, discord_public_key: String) -> Self {

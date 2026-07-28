@@ -9,6 +9,7 @@ use memebucket_server::{
     app_state::AppState,
     auth::sessions::{AuthenticatedUser, create_session},
     config::RootAdminConfig,
+    domain::user_key::DiscordUserKey,
     repositories::{
         admin::{AdminRepository, AdminUserRecord},
         users::{StoredIdentity, StoredUser, UserRepo, UserRepository},
@@ -22,6 +23,7 @@ use uuid::Uuid;
 
 const ROOT_PROVIDER_ID: &str = "root-provider-id-0000";
 const TEST_SESSION_SECRET: &str = "admin-api-test-session-secret";
+const TEST_APP_USER_KEY_SECRET: &str = "admin-api-test-user-key-secret";
 
 async fn test_pool() -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -135,6 +137,8 @@ struct AdminFixture {
     normal_user: StoredUser,
     target: StoredUser,
     full_provider_id: String,
+    raw_discord_id: String,
+    hashed_discord_id: String,
 }
 
 async fn admin_fixture() -> AdminFixture {
@@ -171,6 +175,22 @@ async fn admin_fixture() -> AdminFixture {
         )
         .await
         .unwrap();
+    let raw_discord_id = "561385770724622356".to_string();
+    let hashed_discord_id =
+        DiscordUserKey::derive(TEST_APP_USER_KEY_SECRET.as_bytes(), &raw_discord_id);
+    let raw_target = users
+        .upsert_by_provider(
+            "discord",
+            hashed_discord_id.as_hex(),
+            Some("Raw Search User"),
+            None,
+        )
+        .await
+        .unwrap();
+    users
+        .update_username(raw_target.id, "raw-search-user")
+        .await
+        .unwrap();
     sqlx::query("UPDATE users SET role = 'admin' WHERE id = ?")
         .bind(normal_admin.id.to_string())
         .execute(&pool)
@@ -182,7 +202,8 @@ async fn admin_fixture() -> AdminFixture {
         .with_root_admin_config(
             RootAdminConfig::parse(&format!("discord:{ROOT_PROVIDER_ID}")).unwrap(),
         )
-        .with_session_secret(TEST_SESSION_SECRET.to_string());
+        .with_session_secret(TEST_SESSION_SECRET.to_string())
+        .with_app_user_key_secret(TEST_APP_USER_KEY_SECRET.to_string());
 
     AdminFixture {
         app: build_router_for_tests(state),
@@ -192,6 +213,8 @@ async fn admin_fixture() -> AdminFixture {
         normal_user,
         target,
         full_provider_id,
+        raw_discord_id,
+        hashed_discord_id: hashed_discord_id.as_hex().to_string(),
     }
 }
 
@@ -301,6 +324,19 @@ async fn admin_search_masks_provider_ids_and_finds_username_or_identity() {
     assert_eq!(json[0]["permissions"]["upload_local_images"], false);
     assert_eq!(json[0]["permissions"]["view_admin_stats"], false);
     assert_eq!(json[0]["permissions"]["manage_permissions"], false);
+}
+
+#[tokio::test]
+async fn admin_search_finds_raw_discord_id_without_exposing_identity_values() {
+    let fixture = admin_fixture().await;
+
+    let response = get_admin_users(&fixture.app, &fixture.root, &fixture.raw_discord_id).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_body(response).await;
+
+    assert_eq!(json[0]["username"], "raw-search-user");
+    assert!(!json.to_string().contains(&fixture.raw_discord_id));
+    assert!(!json.to_string().contains(&fixture.hashed_discord_id));
 }
 
 #[tokio::test]
