@@ -46,6 +46,32 @@ export async function apiPost<TRequest, TResponse>(path: string, body: TRequest)
   return response.json() as Promise<TResponse>;
 }
 
+export async function apiUpload<TResponse>(path: string, file: File): Promise<TResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+      "X-CSRF-Token": getCsrfToken(),
+    },
+    body: formData,
+  });
+
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("Unauthorized");
+  }
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  return response.json() as Promise<TResponse>;
+}
+
 export async function apiPatch<TRequest, TResponse>(path: string, body: TRequest): Promise<TResponse> {
   const response = await fetch(path, {
     method: "PATCH",
