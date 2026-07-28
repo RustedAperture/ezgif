@@ -10,6 +10,8 @@ use std::sync::Arc;
 pub enum StorageError {
     #[error("fetch failed: {0}")]
     FetchFailed(String),
+    #[error("invalid image data")]
+    InvalidImage,
     #[error("upload failed: {0}")]
     UploadFailed(String),
 }
@@ -158,8 +160,7 @@ impl StorageService {
     }
 
     pub async fn upload_image_bytes(&self, bytes: Vec<u8>) -> Result<String, StorageError> {
-        let format = image::guess_format(&bytes)
-            .map_err(|_| StorageError::UploadFailed("invalid image data".to_string()))?;
+        let format = image::guess_format(&bytes).map_err(|_| StorageError::InvalidImage)?;
         let bytes_for_conversion = bytes.clone();
         let webp_bytes = tokio::task::spawn_blocking(move || match format {
             image::ImageFormat::Gif => convert_gif_to_animated_webp(&bytes_for_conversion),
@@ -167,7 +168,7 @@ impl StorageService {
         })
         .await
         .map_err(|e| StorageError::UploadFailed(format!("image conversion task failed: {e}")))?
-        .map_err(|_| StorageError::UploadFailed("invalid image data".to_string()))?;
+        .map_err(|_| StorageError::InvalidImage)?;
 
         self.store_bytes(webp_bytes, "webp").await
     }
@@ -608,6 +609,21 @@ mod dedup_tests {
         let second = svc.upload_image_bytes(source_bytes).await.unwrap();
 
         assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn upload_image_bytes_returns_typed_invalid_image_error_for_malformed_bytes() {
+        let pool = setup_test_db().await;
+        let store = Arc::new(InMemory::new());
+        let svc =
+            StorageService::new_with_store(store.clone(), "https://cdn.example.com", pool.clone());
+
+        let error = svc
+            .upload_image_bytes(b"definitely-not-a-real-image".to_vec())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, StorageError::InvalidImage));
     }
 
     #[tokio::test]

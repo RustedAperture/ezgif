@@ -70,17 +70,15 @@ fn sample_png_bytes() -> Vec<u8> {
     bytes
 }
 
-async fn multipart_upload_body(
-    field_name: &str,
-    file_name: &str,
-    content_type: &str,
-    bytes: &[u8],
-) -> (String, Vec<u8>) {
-    let part = reqwest::multipart::Part::bytes(bytes.to_vec())
-        .file_name(file_name.to_string())
-        .mime_str(content_type)
-        .unwrap();
-    let form = reqwest::multipart::Form::new().part(field_name.to_string(), part);
+async fn multipart_upload_body(parts: &[(&str, &str, &str, &[u8])]) -> (String, Vec<u8>) {
+    let mut form = reqwest::multipart::Form::new();
+    for (field_name, file_name, content_type, bytes) in parts {
+        let part = reqwest::multipart::Part::bytes(bytes.to_vec())
+            .file_name((*file_name).to_string())
+            .mime_str(content_type)
+            .unwrap();
+        form = form.part((*field_name).to_string(), part);
+    }
     let mut request = reqwest::Client::new()
         .post("http://example.test/upload")
         .multipart(form)
@@ -705,7 +703,7 @@ async fn upload_image_permitted_owner_creates_image_row() {
     let app = build_router_for_tests(state);
 
     let (content_type, body) =
-        multipart_upload_body("file", "upload.png", "image/png", &sample_png_bytes()).await;
+        multipart_upload_body(&[("file", "upload.png", "image/png", &sample_png_bytes())]).await;
     let mut request = Request::builder()
         .method("POST")
         .uri(format!("/api/buckets/{}/images/upload", bucket.id))
@@ -731,6 +729,8 @@ async fn upload_image_permitted_owner_creates_image_row() {
         .await
         .unwrap();
     assert_eq!(images.len(), 1);
+    assert_eq!(images[0].title.as_deref(), Some(""));
+    assert!(images[0].tags.is_empty());
 }
 
 #[tokio::test]
@@ -760,7 +760,7 @@ async fn upload_image_duplicate_upload_creates_second_row_with_same_url() {
 
     let source_bytes = sample_png_bytes();
     let (content_type, first_body) =
-        multipart_upload_body("file", "upload.png", "image/png", &source_bytes).await;
+        multipart_upload_body(&[("file", "upload.png", "image/png", &source_bytes)]).await;
     let mut first_request = Request::builder()
         .method("POST")
         .uri(format!("/api/buckets/{}/images/upload", bucket.id))
@@ -783,7 +783,7 @@ async fn upload_image_duplicate_upload_creates_second_row_with_same_url() {
     let first_json: serde_json::Value = serde_json::from_slice(&first_body).unwrap();
 
     let (content_type, second_body) =
-        multipart_upload_body("file", "upload.png", "image/png", &source_bytes).await;
+        multipart_upload_body(&[("file", "upload.png", "image/png", &source_bytes)]).await;
     let mut second_request = Request::builder()
         .method("POST")
         .uri(format!("/api/buckets/{}/images/upload", bucket.id))
@@ -837,7 +837,7 @@ async fn upload_image_without_permission_returns_forbidden() {
     let app = build_router_for_tests(state);
 
     let (content_type, body) =
-        multipart_upload_body("file", "upload.png", "image/png", &sample_png_bytes()).await;
+        multipart_upload_body(&[("file", "upload.png", "image/png", &sample_png_bytes())]).await;
     let mut request = Request::builder()
         .method("POST")
         .uri(format!("/api/buckets/{}/images/upload", bucket.id))
@@ -889,7 +889,7 @@ async fn upload_image_non_owner_returns_forbidden() {
     let app = build_router_for_tests(state);
 
     let (content_type, body) =
-        multipart_upload_body("file", "upload.png", "image/png", &sample_png_bytes()).await;
+        multipart_upload_body(&[("file", "upload.png", "image/png", &sample_png_bytes())]).await;
     let mut request = Request::builder()
         .method("POST")
         .uri(format!("/api/buckets/{}/images/upload", bucket.id))
@@ -938,7 +938,7 @@ async fn upload_image_rejects_payload_over_twenty_mib() {
 
     let oversized = vec![0_u8; 20 * 1024 * 1024 + 1];
     let (content_type, body) =
-        multipart_upload_body("file", "upload.png", "image/png", &oversized).await;
+        multipart_upload_body(&[("file", "upload.png", "image/png", &oversized)]).await;
     let mut request = Request::builder()
         .method("POST")
         .uri(format!("/api/buckets/{}/images/upload", bucket.id))
@@ -985,12 +985,112 @@ async fn upload_image_rejects_malformed_image_bytes_without_creating_row() {
         .unwrap();
     let app = build_router_for_tests(state);
 
-    let (content_type, body) = multipart_upload_body(
+    let (content_type, body) = multipart_upload_body(&[(
         "file",
         "upload.png",
         "image/png",
         b"definitely-not-a-real-image",
-    )
+    )])
+    .await;
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/buckets/{}/images/upload", bucket.id))
+        .header("content-type", content_type)
+        .body(Body::from(body))
+        .unwrap();
+    request.extensions_mut().insert(AuthenticatedUser {
+        user_id: owner.id,
+        role: "user".to_string(),
+    });
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let images = images_repo
+        .list_for_bucket(owner.id, bucket.id)
+        .await
+        .unwrap();
+    assert!(images.is_empty());
+}
+
+#[tokio::test]
+async fn upload_image_rejects_wrong_multipart_field_name() {
+    let pool = test_pool().await;
+    let users = UserRepository::new(pool.clone());
+    let buckets = BucketRepository::new(pool.clone());
+    let images_repo = ImageRepository::new(pool.clone());
+    let owner = users
+        .upsert_by_provider("discord", "upload-owner-wrong-field", None, None)
+        .await
+        .unwrap();
+    let bucket = buckets.create(owner.id, "Bucket").await.unwrap();
+
+    let state =
+        AppState::for_tests(pool.clone()).with_storage(Some(StorageService::new_with_store(
+            Arc::new(InMemory::new()),
+            "https://cdn.example.com",
+            pool.clone(),
+        )));
+    state
+        .admin_repo
+        .set_permission(owner.id, "upload_local_images", true)
+        .await
+        .unwrap();
+    let app = build_router_for_tests(state);
+
+    let (content_type, body) =
+        multipart_upload_body(&[("image", "upload.png", "image/png", &sample_png_bytes())]).await;
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/buckets/{}/images/upload", bucket.id))
+        .header("content-type", content_type)
+        .body(Body::from(body))
+        .unwrap();
+    request.extensions_mut().insert(AuthenticatedUser {
+        user_id: owner.id,
+        role: "user".to_string(),
+    });
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let images = images_repo
+        .list_for_bucket(owner.id, bucket.id)
+        .await
+        .unwrap();
+    assert!(images.is_empty());
+}
+
+#[tokio::test]
+async fn upload_image_rejects_second_multipart_field() {
+    let pool = test_pool().await;
+    let users = UserRepository::new(pool.clone());
+    let buckets = BucketRepository::new(pool.clone());
+    let images_repo = ImageRepository::new(pool.clone());
+    let owner = users
+        .upsert_by_provider("discord", "upload-owner-extra-field", None, None)
+        .await
+        .unwrap();
+    let bucket = buckets.create(owner.id, "Bucket").await.unwrap();
+
+    let state =
+        AppState::for_tests(pool.clone()).with_storage(Some(StorageService::new_with_store(
+            Arc::new(InMemory::new()),
+            "https://cdn.example.com",
+            pool.clone(),
+        )));
+    state
+        .admin_repo
+        .set_permission(owner.id, "upload_local_images", true)
+        .await
+        .unwrap();
+    let app = build_router_for_tests(state);
+
+    let extra_bytes = b"not-used";
+    let (content_type, body) = multipart_upload_body(&[
+        ("file", "upload.png", "image/png", &sample_png_bytes()),
+        ("note", "note.txt", "text/plain", extra_bytes),
+    ])
     .await;
     let mut request = Request::builder()
         .method("POST")

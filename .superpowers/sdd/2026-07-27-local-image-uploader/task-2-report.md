@@ -7,6 +7,7 @@ Files changed:
 - `Cargo.toml`
 - `Cargo.lock`
 - `apps/server/src/services/storage.rs`
+- `apps/server/src/services/migration.rs`
 - `apps/server/src/api/images.rs`
 - `apps/server/src/error.rs`
 - `apps/server/src/router.rs`
@@ -44,3 +45,35 @@ Concerns:
 
 - The upload route now uses a route-local body cap of 21 MiB so a 20 MiB file plus multipart framing reaches the handler. If request metadata grows materially in the future, that overhead budget may need a small adjustment.
 - Invalid uploaded image bytes currently surface as `400 Bad Request`, which matches the focused tests. If product wants `422 Unprocessable Entity` instead, the handler mapping can be adjusted without changing the storage path.
+
+## Fix round 1 — reviewer findings
+
+What changed:
+
+- Added endpoint coverage for rejecting a wrong multipart field name and rejecting a second multipart field.
+- Tightened the permitted-owner happy-path assertion so it verifies the created row stores a blank title (`""`) and no tags.
+- Replaced string matching on `"invalid image data"` with a typed `StorageError::InvalidImage` variant.
+- Mapped `StorageError::InvalidImage` explicitly to the client `400 Bad Request` upload response while preserving other storage failures as server errors.
+- Added the minimal migration match arm required by the new storage error variant.
+
+Focused tests and results:
+
+- `cargo test -p memebucket-server invalid_image -- --nocapture`
+  - Passed
+  - Included:
+    - `api::images::tests::map_upload_storage_error_maps_invalid_image_to_bad_request`
+    - `services::storage::dedup_tests::upload_image_bytes_returns_typed_invalid_image_error_for_malformed_bytes`
+- `cargo test -p memebucket-server --test images_api upload_image_ -- --nocapture`
+  - Passed
+  - Included:
+    - `upload_image_rejects_wrong_multipart_field_name`
+    - `upload_image_rejects_second_multipart_field`
+    - `upload_image_permitted_owner_creates_image_row`
+    - plus the existing upload endpoint regression cases
+
+Verification after fix round:
+
+- `cargo test -p memebucket-server`
+  - Passed
+- `cargo fmt --all --check`
+  - Passed

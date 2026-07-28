@@ -361,7 +361,7 @@ pub async fn upload_image(
 
     let image = state
         .image_repo
-        .create_with_metadata(user.user_id, bucket_id, &cdn_url, None, false, 1, &[])
+        .create_with_metadata(user.user_id, bucket_id, &cdn_url, Some(""), false, 1, &[])
         .await?;
 
     Ok(Json(image_response_from_stored(image, 0)))
@@ -793,9 +793,7 @@ async fn read_uploaded_file_bytes(mut multipart: Multipart) -> Result<Vec<u8>, A
 
 fn map_upload_storage_error(error: StorageError) -> AppError {
     match error {
-        StorageError::UploadFailed(message) if message == "invalid image data" => {
-            AppError::BadRequest(message)
-        }
+        StorageError::InvalidImage => AppError::BadRequest("invalid image data".to_string()),
         StorageError::UploadFailed(message) => AppError::InternalServerError(message),
         StorageError::FetchFailed(message) => AppError::InternalServerError(message),
     }
@@ -931,5 +929,20 @@ mod tests {
     fn compute_notes_patch_no_change_when_no_auto_notes_available() {
         let result = compute_notes_patch(None, None, None);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn map_upload_storage_error_maps_invalid_image_to_bad_request() {
+        let error = map_upload_storage_error(StorageError::InvalidImage);
+        assert!(matches!(error, AppError::BadRequest(message) if message == "invalid image data"));
+    }
+
+    #[test]
+    fn map_upload_storage_error_keeps_other_upload_failures_as_server_errors() {
+        let error =
+            map_upload_storage_error(StorageError::UploadFailed("b2 write failed".to_string()));
+        assert!(
+            matches!(error, AppError::InternalServerError(message) if message == "b2 write failed")
+        );
     }
 }
