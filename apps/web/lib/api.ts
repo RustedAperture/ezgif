@@ -8,6 +8,7 @@ export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(path, {
     credentials: "include",
     headers: { accept: "application/json" },
+    cache: "no-store",
   });
 
   if (response.status === 401) {

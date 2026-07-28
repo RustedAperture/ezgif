@@ -98,6 +98,35 @@ describe("apiUpload", () => {
   });
 });
 
+describe("apiGet", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("bypasses the browser cache for fresh bucket and image listings", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await api.apiGet("/api/buckets/bucket-1/images");
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/buckets/bucket-1/images", {
+      credentials: "include",
+      headers: { accept: "application/json" },
+      cache: "no-store",
+    });
+  });
+});
+
 describe("ImageUploadDropzone", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
