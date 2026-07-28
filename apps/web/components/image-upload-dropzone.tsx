@@ -212,6 +212,7 @@ export function ImageUploadDropzone({
         <input
           ref={inputRef}
           type="file"
+          aria-label="Select image files"
           accept="image/*"
           multiple
           className="hidden"

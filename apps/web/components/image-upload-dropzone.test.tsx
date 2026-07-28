@@ -77,12 +77,14 @@ describe("apiUpload", () => {
 
   it("redirects unauthorized uploads to login", async () => {
     fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
+    vi.stubGlobal("window", { location: { href: "http://localhost:3000/" } });
 
     expect(api.apiUpload).toBeTypeOf("function");
 
     await expect(api.apiUpload("/api/buckets/bucket-1/images/upload", imageFile("cat.png"))).rejects.toThrow(
       "Unauthorized",
     );
+    expect(window.location.href).toBe("/login");
   });
 
   it("surfaces text error responses", async () => {
@@ -107,6 +109,29 @@ describe("ImageUploadDropzone", () => {
     cleanup();
     vi.unstubAllGlobals();
     document.cookie = "csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
+  });
+
+  it("uploads images selected through the hidden file input", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "image-1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const { ImageUploadDropzone } = await import("@/components/image-upload-dropzone");
+    const onUploaded = vi.fn();
+
+    render(<ImageUploadDropzone bucketId="bucket-1" onUploaded={onUploaded} />);
+
+    const input = screen.getByLabelText("Select image files");
+    fireEvent.change(input, { target: { files: [imageFile("selected.png")] } });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText("Uploaded: 1")).toBeTruthy());
+
+    expect(screen.getByText("selected.png")).toBeTruthy();
+    expect(onUploaded).toHaveBeenCalledTimes(1);
   });
 
   it("uploads a dropped image and reports success", async () => {
