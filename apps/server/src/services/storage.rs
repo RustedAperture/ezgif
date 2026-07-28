@@ -50,7 +50,6 @@ impl StorageService {
         })
     }
 
-    #[cfg(test)]
     pub fn new_with_store(
         store: Arc<dyn ObjectStore>,
         cdn_base_url: &str,
@@ -156,6 +155,21 @@ impl StorageService {
         };
 
         self.store_bytes(final_bytes, ext).await
+    }
+
+    pub async fn upload_image_bytes(&self, bytes: Vec<u8>) -> Result<String, StorageError> {
+        let format = image::guess_format(&bytes)
+            .map_err(|_| StorageError::UploadFailed("invalid image data".to_string()))?;
+        let bytes_for_conversion = bytes.clone();
+        let webp_bytes = tokio::task::spawn_blocking(move || match format {
+            image::ImageFormat::Gif => convert_gif_to_animated_webp(&bytes_for_conversion),
+            _ => convert_to_webp(&bytes_for_conversion),
+        })
+        .await
+        .map_err(|e| StorageError::UploadFailed(format!("image conversion task failed: {e}")))?
+        .map_err(|_| StorageError::UploadFailed("invalid image data".to_string()))?;
+
+        self.store_bytes(webp_bytes, "webp").await
     }
 
     /// Upload raw bytes to B2, deduplicating by content hash.
@@ -475,6 +489,7 @@ mod tests {
 #[cfg(test)]
 mod dedup_tests {
     use super::*;
+    use object_store::memory::InMemory;
     use sqlx::SqlitePool;
 
     async fn setup_test_db() -> SqlitePool {
@@ -499,6 +514,15 @@ mod dedup_tests {
         .await
         .unwrap();
         pool
+    }
+
+    fn sample_png_bytes() -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(2, 1, image::Rgba([255, 0, 0, 255]));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .unwrap();
+        bytes
     }
 
     #[tokio::test]
@@ -542,8 +566,52 @@ mod dedup_tests {
     }
 
     #[tokio::test]
+    async fn upload_image_bytes_converts_png_to_webp() {
+        let pool = setup_test_db().await;
+        let store = Arc::new(InMemory::new());
+        let svc =
+            StorageService::new_with_store(store.clone(), "https://cdn.example.com", pool.clone());
+
+        let source_bytes = sample_png_bytes();
+        let result = svc.upload_image_bytes(source_bytes).await.unwrap();
+
+        assert!(result.ends_with(".webp"));
+
+        let key = result
+            .strip_prefix("https://cdn.example.com/")
+            .expect("cdn base URL prefix")
+            .to_string();
+        let stored = store
+            .get(&object_store::path::Path::from(key))
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        assert_eq!(
+            image::guess_format(&stored).unwrap(),
+            image::ImageFormat::WebP
+        );
+        image::load_from_memory_with_format(&stored, image::ImageFormat::WebP).unwrap();
+    }
+
+    #[tokio::test]
+    async fn upload_image_bytes_reuses_existing_webp_object_for_duplicate_source() {
+        let pool = setup_test_db().await;
+        let store = Arc::new(InMemory::new());
+        let svc =
+            StorageService::new_with_store(store.clone(), "https://cdn.example.com", pool.clone());
+
+        let source_bytes = sample_png_bytes();
+
+        let first = svc.upload_image_bytes(source_bytes.clone()).await.unwrap();
+        let second = svc.upload_image_bytes(source_bytes).await.unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    #[tokio::test]
     async fn store_bytes_on_miss_uploads_and_inserts() {
-        use object_store::memory::InMemory;
         let pool = setup_test_db().await;
         let store = Arc::new(InMemory::new());
         let svc =
@@ -568,7 +636,6 @@ mod dedup_tests {
 
     #[tokio::test]
     async fn store_bytes_on_hit_returns_existing_url_without_uploading() {
-        use object_store::memory::InMemory;
         let pool = setup_test_db().await;
         let store = Arc::new(InMemory::new());
         let svc =
@@ -597,7 +664,6 @@ mod dedup_tests {
 
     #[tokio::test]
     async fn garbage_collect_removes_unreferenced_object_and_mapping() {
-        use object_store::memory::InMemory;
         let pool = setup_test_db().await;
         let store = Arc::new(InMemory::new());
         let svc =
@@ -620,7 +686,6 @@ mod dedup_tests {
 
     #[tokio::test]
     async fn garbage_collect_keeps_shared_object_and_mapping() {
-        use object_store::memory::InMemory;
         let pool = setup_test_db().await;
         let store = Arc::new(InMemory::new());
         let svc =

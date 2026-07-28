@@ -1,5 +1,6 @@
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     response::IntoResponse,
     routing::{delete, get, post},
 };
@@ -18,7 +19,8 @@ use crate::{
         buckets::{create_bucket, delete_bucket, list_buckets, rename_bucket},
         gifs::search_gifs,
         images::{
-            create_image, delete_image, list_images, record_image_send, search_images, update_image,
+            create_image, delete_image, list_images, record_image_send, search_images,
+            update_image, upload_image,
         },
     },
     app_state::AppState,
@@ -27,6 +29,8 @@ use crate::{
     discord::interactions::handle_interaction,
     static_files::static_fallback,
 };
+
+const LOCAL_IMAGE_UPLOAD_BODY_LIMIT_BYTES: usize = 21 * 1024 * 1024;
 
 pub fn build_router(state: AppState) -> Router {
     build_router_internal(state, false)
@@ -62,6 +66,10 @@ fn build_router_internal(state: AppState, is_test: bool) -> Router {
         .route(
             "/api/buckets/{bucket_id}/images",
             get(list_images).post(create_image),
+        )
+        .route(
+            "/api/buckets/{bucket_id}/images/upload",
+            post(upload_image).layer(DefaultBodyLimit::max(LOCAL_IMAGE_UPLOAD_BODY_LIMIT_BYTES)),
         )
         .route(
             "/api/buckets/{bucket_id}/images/bulk",
