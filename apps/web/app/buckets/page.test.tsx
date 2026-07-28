@@ -240,6 +240,16 @@ describe("BucketsPage upload dropzone integration", () => {
     expect(screen.queryByTestId("upload-dropzone")).toBeNull();
   });
 
+  it.each(["all", "favorites"])("hides the upload dropzone for the %s system view", async (systemBucketId) => {
+    mocks.bucketId = systemBucketId;
+    mocks.buckets = [makeBucket()];
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText(`image list 1 for ${systemBucketId} readonly=false`)).toBeTruthy());
+    expect(screen.queryByTestId("upload-dropzone")).toBeNull();
+  });
+
   it("hides the upload dropzone when there is no active bucket", async () => {
     mocks.bucketId = null;
     mocks.buckets = [makeBucket()];
