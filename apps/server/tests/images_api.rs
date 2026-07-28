@@ -9,6 +9,7 @@ use http_body_util::BodyExt;
 use memebucket_server::{
     app_state::AppState,
     auth::sessions::AuthenticatedUser,
+    config::RootAdminConfig,
     repositories::{
         BucketRepo, ImageRepo, SendHistoryRepo, UserRepo, buckets::BucketRepository,
         images::ImageRepository, users::UserRepository,
@@ -814,6 +815,50 @@ async fn upload_image_duplicate_upload_creates_second_row_with_same_url() {
     assert_eq!(images.len(), 2);
     assert_eq!(images[0].url, images[1].url);
     assert_ne!(images[0].id, images[1].id);
+}
+
+#[tokio::test]
+async fn upload_image_configured_root_admin_owner_succeeds_without_explicit_permission_row() {
+    let pool = test_pool().await;
+    let users = UserRepository::new(pool.clone());
+    let buckets = BucketRepository::new(pool.clone());
+    let images_repo = ImageRepository::new(pool.clone());
+    let owner = users
+        .upsert_by_provider("discord", "upload-root-owner", None, None)
+        .await
+        .unwrap();
+    let bucket = buckets.create(owner.id, "Bucket").await.unwrap();
+
+    let state = AppState::for_tests(pool.clone())
+        .with_root_admin_config(RootAdminConfig::parse("discord:upload-root-owner").unwrap())
+        .with_storage(Some(StorageService::new_with_store(
+            Arc::new(InMemory::new()),
+            "https://cdn.example.com",
+            pool.clone(),
+        )));
+    let app = build_router_for_tests(state);
+
+    let (content_type, body) =
+        multipart_upload_body(&[("file", "upload.png", "image/png", &sample_png_bytes())]).await;
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/buckets/{}/images/upload", bucket.id))
+        .header("content-type", content_type)
+        .body(Body::from(body))
+        .unwrap();
+    request.extensions_mut().insert(AuthenticatedUser {
+        user_id: owner.id,
+        role: "user".to_string(),
+    });
+
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let images = images_repo
+        .list_for_bucket(owner.id, bucket.id)
+        .await
+        .unwrap();
+    assert_eq!(images.len(), 1);
 }
 
 #[tokio::test]

@@ -333,10 +333,12 @@ pub async fn upload_image(
     Path(bucket_id): Path<Uuid>,
     multipart: Multipart,
 ) -> Result<Json<ImageResponse>, AppError> {
-    let has_permission = state
-        .admin_repo
-        .has_permission(user.user_id, "upload_local_images")
-        .await?;
+    let is_root_admin = state.is_root_admin(user.user_id).await?;
+    let has_permission = is_root_admin
+        || state
+            .admin_repo
+            .has_permission(user.user_id, "upload_local_images")
+            .await?;
     if !has_permission {
         return Err(AppError::Forbidden);
     }

@@ -14,6 +14,7 @@ type UploadStatus = "queued" | "uploading" | "succeeded" | "failed";
 type UploadItem = {
   id: number;
   file: File;
+  bucketId: string;
   status: UploadStatus;
   message: string;
 };
@@ -73,7 +74,7 @@ export function ImageUploadDropzone({
     for (const item of nextItems) {
       void (async () => {
         try {
-          await apiUpload(`/api/buckets/${bucketId}/images/upload`, item.file);
+          await apiUpload(`/api/buckets/${item.bucketId}/images/upload`, item.file);
           onUploaded();
           setItems((currentItems) =>
             currentItems.map((currentItem) =>
@@ -97,7 +98,7 @@ export function ImageUploadDropzone({
         }
       })();
     }
-  }, [bucketId, counts.uploading, disabled, items, onUploaded]);
+  }, [counts.uploading, disabled, items, onUploaded]);
 
   function queueFiles(fileList: Iterable<File>) {
     const nextItems: UploadItem[] = [];
@@ -107,6 +108,7 @@ export function ImageUploadDropzone({
         nextItems.push({
           id: nextIdRef.current++,
           file,
+          bucketId,
           status: "failed",
           message: "Images only",
         });
@@ -117,6 +119,7 @@ export function ImageUploadDropzone({
         nextItems.push({
           id: nextIdRef.current++,
           file,
+          bucketId,
           status: "failed",
           message: "Too large (max 20 MiB)",
         });
@@ -126,6 +129,7 @@ export function ImageUploadDropzone({
       nextItems.push({
         id: nextIdRef.current++,
         file,
+        bucketId,
         status: "queued",
         message: "Queued",
       });

@@ -281,4 +281,58 @@ describe("ImageUploadDropzone", () => {
     expect(screen.getByText("Upload failed")).toBeTruthy();
     expect(onUploaded).toHaveBeenCalledTimes(3);
   });
+
+  it("keeps queued uploads on their original bucket after the prop changes", async () => {
+    const pending: Array<ReturnType<typeof deferred<Response>>> = [];
+    fetchMock.mockImplementation(() => {
+      const request = deferred<Response>();
+      pending.push(request);
+      return request.promise;
+    });
+
+    const { ImageUploadDropzone } = await import("@/components/image-upload-dropzone");
+    const onUploaded = vi.fn();
+
+    const { rerender } = render(<ImageUploadDropzone bucketId="bucket-a" onUploaded={onUploaded} />);
+
+    fireEvent.drop(
+      screen.getByRole("region", { name: "Image upload" }),
+      droppedFiles([
+        imageFile("one.png"),
+        imageFile("two.png"),
+        imageFile("three.png"),
+        imageFile("four.png"),
+      ]),
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/api/buckets/bucket-a/images/upload",
+      "/api/buckets/bucket-a/images/upload",
+      "/api/buckets/bucket-a/images/upload",
+    ]);
+
+    rerender(<ImageUploadDropzone bucketId="bucket-b" onUploaded={onUploaded} />);
+
+    pending[0]!.resolve(
+      new Response(JSON.stringify({ id: "image-1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("/api/buckets/bucket-a/images/upload");
+
+    for (const request of pending.slice(1)) {
+      request.resolve(
+        new Response(JSON.stringify({ id: "image-ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
+
+    await waitFor(() => expect(screen.getByText("Uploaded: 4")).toBeTruthy());
+  });
 });
