@@ -1,12 +1,11 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { apiGet, apiPatch } from "@/lib/api";
 import type { AdminPermissions, AdminUser } from "@/lib/types";
 import { useUser } from "@/components/user-provider";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,6 +35,7 @@ import {
 } from "@/components/ui/table";
 
 type PermissionName = keyof AdminPermissions;
+const SEARCH_DEBOUNCE_MS = 300;
 
 const permissionLabels: Record<PermissionName, string> = {
   upload_local_images: "Upload local images",
@@ -59,6 +59,7 @@ export function AdminUsersTable() {
   const [pendingControls, setPendingControls] = useState<Set<string>>(new Set());
   const [pendingRoleChange, setPendingRoleChange] = useState<PendingRoleChange | null>(null);
   const requestGeneration = useRef(0);
+  const hasLoadedUsers = useRef(false);
 
   const loadUsers = useCallback(async (searchQuery: string) => {
     const generation = ++requestGeneration.current;
@@ -78,15 +79,13 @@ export function AdminUsersTable() {
   }, []);
 
   useEffect(() => {
-    queueMicrotask(() => {
-      void loadUsers("");
-    });
-  }, [loadUsers]);
+    const timeout = window.setTimeout(() => {
+      hasLoadedUsers.current = true;
+      void loadUsers(query);
+    }, hasLoadedUsers.current ? SEARCH_DEBOUNCE_MS : 0);
 
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void loadUsers(query);
-  }
+    return () => window.clearTimeout(timeout);
+  }, [loadUsers, query]);
 
   function setControlPending(control: string, pending: boolean) {
     setPendingControls((current) => {
@@ -179,15 +178,14 @@ export function AdminUsersTable() {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
-      <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submitSearch}>
+      <div>
         <Input
           aria-label="Search users"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search username or linked identity"
         />
-        <Button type="submit" disabled={loading}>Search</Button>
-      </form>
+      </div>
 
       {error && <p role="alert" className="text-sm text-destructive">Could not load users. Try again.</p>}
       {loading ? (

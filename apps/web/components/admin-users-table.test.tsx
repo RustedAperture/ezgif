@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminUsersTable } from "@/components/admin-users-table";
 
@@ -163,10 +163,15 @@ function isDisabled(element: HTMLElement) {
 }
 
 describe("AdminUsersTable", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   beforeEach(() => {
     mocks.toastError.mockReset();
+    mocks.apiGet.mockReset();
+    mocks.apiPatch.mockReset();
     mocks.useUser.mockReturnValue({
       user: {
         id: "admin-1",
@@ -224,6 +229,30 @@ describe("AdminUsersTable", () => {
     }
   });
 
+  it("searches automatically after the user stops typing", async () => {
+    vi.useFakeTimers();
+    mocks.apiGet.mockResolvedValue([adminUser("search result")]);
+
+    render(<AdminUsersTable />);
+    await act(async () => {
+      await Promise.resolve();
+      vi.advanceTimersByTime(0);
+    });
+
+    const search = screen.getByRole("textbox", { name: "Search users" });
+    fireEvent.change(search, { target: { value: "search" } });
+
+    await act(async () => {
+      vi.advanceTimersByTime(299);
+    });
+    expect(mocks.apiGet).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(mocks.apiGet).toHaveBeenLastCalledWith("/api/admin/users?q=search");
+  });
+
   it("keeps the most recently submitted search results when an older request settles later", async () => {
     const initialRequest = deferred<ReturnType<typeof adminUser>[]>();
     const searchRequest = deferred<ReturnType<typeof adminUser>[]>();
@@ -235,7 +264,6 @@ describe("AdminUsersTable", () => {
 
     await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledWith("/api/admin/users"));
     fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), { target: { value: "newer" } });
-    fireEvent.submit(screen.getByRole("textbox", { name: "Search users" }).closest("form")!);
     await waitFor(() => expect(mocks.apiGet).toHaveBeenLastCalledWith("/api/admin/users?q=newer"));
 
     searchRequest.resolve([adminUser("newer result")]);
@@ -260,7 +288,6 @@ describe("AdminUsersTable", () => {
     expect(await screen.findByText("prior result")).toBeTruthy();
 
     fireEvent.change(screen.getByRole("textbox", { name: "Search users" }), { target: { value: "missing" } });
-    fireEvent.submit(screen.getByRole("textbox", { name: "Search users" }).closest("form")!);
     await waitFor(() => expect(mocks.apiGet).toHaveBeenLastCalledWith("/api/admin/users?q=missing"));
 
     searchRequest.reject(new Error("request failed"));
