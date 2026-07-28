@@ -22,6 +22,12 @@ pub struct UserProfileResponse {
     pub avatar_url: Option<String>,
     pub role: String,
     pub is_root_admin: bool,
+    pub permissions: UserProfilePermissions,
+}
+
+#[derive(Serialize)]
+pub struct UserProfilePermissions {
+    pub upload_local_images: bool,
 }
 
 #[derive(Deserialize, Validate)]
@@ -123,6 +129,11 @@ pub async fn get_profile(
         .await?
         .ok_or_else(|| crate::error::AppError::NotFound)?;
     let is_root_admin = state.is_root_admin(user.user_id).await?;
+    let upload_local_images = is_root_admin
+        || state
+            .admin_repo
+            .has_permission(user.user_id, "upload_local_images")
+            .await?;
 
     Ok(Json(UserProfileResponse {
         id: stored.id.to_string(),
@@ -131,6 +142,9 @@ pub async fn get_profile(
         avatar_url: stored.avatar_url,
         role: effective_role(&stored.role, is_root_admin).to_string(),
         is_root_admin,
+        permissions: UserProfilePermissions {
+            upload_local_images,
+        },
     }))
 }
 
