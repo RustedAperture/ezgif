@@ -179,8 +179,8 @@ impl SendHistoryRepo for SendHistoryRepository {
         }
         query.push_str(") GROUP BY image_id");
 
-        let mut built =
-            sqlx::query_as::<_, (String, i64)>(&query).bind(requester_user_id.to_string());
+        let mut built = sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(query))
+            .bind(requester_user_id.to_string());
         for image_id in image_ids {
             built = built.bind(image_id.to_string());
         }
@@ -217,7 +217,8 @@ impl SendHistoryRepo for SendHistoryRepository {
              LIMIT ?"
         );
 
-        let mut query = sqlx::query_scalar::<_, String>(&sql).bind(requester_user_id.to_string());
+        let mut query = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql))
+            .bind(requester_user_id.to_string());
         for bucket_id in bucket_ids {
             query = query.bind(bucket_id.to_string());
         }

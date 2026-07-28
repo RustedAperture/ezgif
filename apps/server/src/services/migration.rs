@@ -58,7 +58,7 @@ where
                 "SELECT id, url FROM images WHERE cdn_status = 'pending' AND id NOT IN ({}) LIMIT 20",
                 placeholders
             );
-            let mut q = sqlx::query_as::<_, (String, String)>(&sql);
+            let mut q = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
             for id in &failed_this_run {
                 q = q.bind(id.as_str());
             }

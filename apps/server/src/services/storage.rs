@@ -1,6 +1,6 @@
 use object_store::{
-    Attribute, AttributeValue, Attributes, ObjectStore, PutOptions, aws::AmazonS3Builder,
-    path::Path as ObjPath,
+    Attribute, AttributeValue, Attributes, ObjectStore, ObjectStoreExt, PutOptions,
+    aws::AmazonS3Builder, path::Path as ObjPath,
 };
 use sqlx::SqlitePool;
 use std::io::Cursor;

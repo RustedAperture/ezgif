@@ -339,7 +339,7 @@ impl ImageRepo for ImageRepository {
         user_id: Uuid,
         filters: &ImageSearchFilters,
     ) -> Result<Vec<StoredImageSearchResult>, sqlx::Error> {
-        let mut builder: QueryBuilder<'_, Sqlite> = QueryBuilder::new(
+        let mut builder: QueryBuilder<Sqlite> = QueryBuilder::new(
             "SELECT p.name, images.id, images.owner_user_id, images.bucket_id, images.url,
                     images.cdn_url, images.cdn_status, images.title, images.favorite, images.random_weight, images.created_at, images.notes
              FROM images
@@ -1007,7 +1007,7 @@ impl ImageRepository {
         }
         query.push_str(") ORDER BY image_id, position");
 
-        let mut built = sqlx::query_as::<_, (String, String)>(&query);
+        let mut built = sqlx::query_as::<_, (String, String)>(sqlx::AssertSqlSafe(query));
         for image_id in image_ids {
             built = built.bind(image_id.to_string());
         }
