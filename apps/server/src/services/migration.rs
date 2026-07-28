@@ -110,6 +110,15 @@ where
                         .await;
                     total_broken += 1;
                 }
+                Err(StorageError::InvalidImage) => {
+                    // Source bytes are not a decodable image — treat as broken.
+                    tracing::warn!("CDN migration: invalid image bytes for {}", url);
+                    let _ = sqlx::query("UPDATE images SET cdn_status = 'broken' WHERE id = ?")
+                        .bind(id)
+                        .execute(&pool)
+                        .await;
+                    total_broken += 1;
+                }
                 Err(StorageError::UploadFailed(e)) => {
                     // Upload failed — leave as pending so it retries next startup,
                     // but exclude this ID from the current run to avoid an infinite loop.

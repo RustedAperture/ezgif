@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
 };
 use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::SqlitePool;
@@ -25,6 +25,7 @@ use validator::Validate;
 const PICKER_DEBOUNCE_WINDOW_SECS: i64 = 3;
 const PICKER_RATE_LIMIT_WINDOW_SECS: i64 = 60;
 const PICKER_RATE_LIMIT_MAX: i64 = 30;
+const MAX_LOCAL_UPLOAD_BYTES: usize = 20 * 1024 * 1024;
 
 #[derive(Deserialize, Validate)]
 pub struct CreateImageRequest {
@@ -322,6 +323,48 @@ pub async fn create_image(
     }
 
     finalize_cdn_status(&state, user.user_id, bucket_id, image.id, resolved_url).await;
+
+    Ok(Json(image_response_from_stored(image, 0)))
+}
+
+pub async fn upload_image(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    Path(bucket_id): Path<Uuid>,
+    multipart: Multipart,
+) -> Result<Json<ImageResponse>, AppError> {
+    let is_root_admin = state.is_root_admin(user.user_id).await?;
+    let has_permission = is_root_admin
+        || state
+            .admin_repo
+            .has_permission(user.user_id, "upload_local_images")
+            .await?;
+    if !has_permission {
+        return Err(AppError::Forbidden);
+    }
+
+    let bucket = state
+        .bucket_repo
+        .get_by_id(bucket_id)
+        .await?
+        .ok_or(AppError::Forbidden)?;
+    if bucket.owner_user_id != user.user_id {
+        return Err(AppError::Forbidden);
+    }
+
+    let bytes = read_uploaded_file_bytes(multipart).await?;
+    let storage = state
+        .storage()
+        .ok_or_else(|| AppError::InternalServerError("storage is not configured".to_string()))?;
+    let cdn_url = storage
+        .upload_image_bytes(bytes)
+        .await
+        .map_err(map_upload_storage_error)?;
+
+    let image = state
+        .image_repo
+        .create_with_metadata(user.user_id, bucket_id, &cdn_url, Some(""), false, 1, &[])
+        .await?;
 
     Ok(Json(image_response_from_stored(image, 0)))
 }
@@ -707,6 +750,57 @@ fn normalized_tag_inputs(tags: &[String]) -> Vec<String> {
     normalized
 }
 
+async fn read_uploaded_file_bytes(mut multipart: Multipart) -> Result<Vec<u8>, AppError> {
+    let mut bytes = Vec::new();
+    {
+        let mut field = multipart
+            .next_field()
+            .await
+            .map_err(|err| AppError::BadRequest(format!("invalid multipart upload: {err}")))?
+            .ok_or_else(|| {
+                AppError::BadRequest("multipart field `file` is required".to_string())
+            })?;
+
+        if field.name() != Some("file") {
+            return Err(AppError::BadRequest(
+                "multipart field must be named `file`".to_string(),
+            ));
+        }
+
+        while let Some(chunk) = field
+            .chunk()
+            .await
+            .map_err(|err| AppError::BadRequest(format!("invalid multipart upload: {err}")))?
+        {
+            if bytes.len().saturating_add(chunk.len()) > MAX_LOCAL_UPLOAD_BYTES {
+                return Err(AppError::PayloadTooLarge);
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+    }
+
+    if multipart
+        .next_field()
+        .await
+        .map_err(|err| AppError::BadRequest(format!("invalid multipart upload: {err}")))?
+        .is_some()
+    {
+        return Err(AppError::BadRequest(
+            "only one multipart field is allowed".to_string(),
+        ));
+    }
+
+    Ok(bytes)
+}
+
+fn map_upload_storage_error(error: StorageError) -> AppError {
+    match error {
+        StorageError::InvalidImage => AppError::BadRequest("invalid image data".to_string()),
+        StorageError::UploadFailed(message) => AppError::InternalServerError(message),
+        StorageError::FetchFailed(message) => AppError::InternalServerError(message),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -837,5 +931,20 @@ mod tests {
     fn compute_notes_patch_no_change_when_no_auto_notes_available() {
         let result = compute_notes_patch(None, None, None);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn map_upload_storage_error_maps_invalid_image_to_bad_request() {
+        let error = map_upload_storage_error(StorageError::InvalidImage);
+        assert!(matches!(error, AppError::BadRequest(message) if message == "invalid image data"));
+    }
+
+    #[test]
+    fn map_upload_storage_error_keeps_other_upload_failures_as_server_errors() {
+        let error =
+            map_upload_storage_error(StorageError::UploadFailed("b2 write failed".to_string()));
+        assert!(
+            matches!(error, AppError::InternalServerError(message) if message == "b2 write failed")
+        );
     }
 }

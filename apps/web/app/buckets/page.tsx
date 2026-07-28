@@ -6,7 +6,8 @@ import { AppShell } from "@/components/app-shell";
 import { BucketList } from "@/components/bucket-list";
 import { ImageForm } from "@/components/image-form";
 import { ImageList } from "@/components/image-list";
-import { Folder, Plus, PanelLeft, Info, Link as LinkIcon, Settings, Trash2, Check, X, Pencil } from "lucide-react";
+import { ImageUploadDropzone } from "@/components/image-upload-dropzone";
+import { Folder, Link as LinkIcon, Settings, Trash2, Check, X, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,16 +22,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { SidebarProvider, Sidebar, SidebarContent, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarProvider, Sidebar, SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Bucket } from "@/lib/types";
 import { ShareDialog } from "@/components/share-dialog";
 import { RequireAuth } from "@/components/require-auth";
+import { useUser } from "@/components/user-provider";
 import { apiDelete, apiPost, apiPatch } from "@/lib/api";
 
 function BucketsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { user } = useUser();
   const bucketId = searchParams.get("id");
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -64,6 +66,9 @@ function BucketsContent() {
   const isOwnedInbox = Boolean(
     activeBucket && !isSubscribed && activeBucket.name.trim().toLowerCase() === "inbox"
   );
+  const canManageActiveBucket = Boolean(activeBucket && !isSubscribed && (!isSystemBucket || isOwnedInbox));
+  const canUploadLocalImages = Boolean(user?.permissions.upload_local_images);
+  const showUploadDropzone = Boolean(bucketId && canManageActiveBucket && canUploadLocalImages);
 
   const handleDeleteBucket = async (bucket: Bucket) => {
     try {
@@ -278,6 +283,13 @@ function BucketsContent() {
         <div className="flex-1 flex flex-col overflow-y-auto">
           {bucketId ? (
             <div className="p-6 space-y-6 max-w-7xl mx-auto w-full">
+              {showUploadDropzone && (
+                <ImageUploadDropzone
+                  bucketId={bucketId}
+                  disabled={!canUploadLocalImages}
+                  onUploaded={() => setRefreshKey((k) => k + 1)}
+                />
+              )}
               <ImageList key={`${bucketId}:${refreshKey}`} bucketId={bucketId} columnClass={columnClass} readonly={isReadOnly} buckets={buckets} onMoveImage={handleImageMoved} onImageUpdated={handleImageMoved} />
             </div>
           ) : (

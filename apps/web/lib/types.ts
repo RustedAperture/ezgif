@@ -5,6 +5,9 @@ export type User = {
   avatar_url: string | null;
   role: "admin" | "user";
   is_root_admin: boolean;
+  permissions: {
+    upload_local_images: boolean;
+  };
 };
 
 export type AdminIdentity = {

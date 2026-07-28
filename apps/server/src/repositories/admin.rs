@@ -165,6 +165,26 @@ impl AdminRepository {
         Ok(())
     }
 
+    pub async fn has_permission(
+        &self,
+        user_id: Uuid,
+        permission: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM user_permissions
+                WHERE user_id = ?
+                  AND permission = ?
+            )",
+        )
+        .bind(user_id.to_string())
+        .bind(permission)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(exists != 0)
+    }
+
     async fn identities_for_user(&self, user_id: Uuid) -> Result<Vec<StoredIdentity>, sqlx::Error> {
         let rows: Vec<StoredIdentityRow> = sqlx::query_as(
             "SELECT id, provider, provider_user_id, display_name, avatar_url

@@ -437,6 +437,42 @@ async fn unknown_roles_and_missing_grants_fail_closed() {
 }
 
 #[tokio::test]
+async fn profile_exposes_missing_upload_permission_as_false() {
+    let fixture = admin_fixture().await;
+
+    let profile = json_body(get_profile(&fixture.app, &fixture.target).await).await;
+
+    assert_eq!(profile["permissions"]["upload_local_images"], false);
+}
+
+#[tokio::test]
+async fn profile_exposes_explicit_upload_permission_as_true() {
+    let fixture = admin_fixture().await;
+
+    patch_permission(
+        &fixture.app,
+        &fixture.root,
+        fixture.target.id,
+        "upload_local_images",
+        true,
+    )
+    .await;
+
+    let profile = json_body(get_profile(&fixture.app, &fixture.target).await).await;
+
+    assert_eq!(profile["permissions"]["upload_local_images"], true);
+}
+
+#[tokio::test]
+async fn profile_exposes_root_upload_permission_without_explicit_row() {
+    let fixture = admin_fixture().await;
+
+    let profile = json_body(get_profile(&fixture.app, &fixture.root).await).await;
+
+    assert_eq!(profile["permissions"]["upload_local_images"], true);
+}
+
+#[tokio::test]
 async fn admin_routes_require_authentication_and_admin_role() {
     let fixture = admin_fixture().await;
     let unauthenticated = fixture
