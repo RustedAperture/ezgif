@@ -104,9 +104,18 @@ pub fn mask_provider_user_id(provider: &str, provider_user_id: &str) -> String {
 
 pub async fn list_users(
     State(state): State<AppState>,
-    _admin: AdminUser,
+    admin: AdminUser,
     Query(query): Query<AdminUsersQuery>,
 ) -> Result<Json<Vec<AdminUserResponse>>, AppError> {
+    if !admin.is_root_admin
+        && !state
+            .admin_repo
+            .has_permission(admin.user_id, MANAGE_PERMISSIONS)
+            .await?
+    {
+        return Err(AppError::Forbidden);
+    }
+
     let discord_search_key = query
         .q
         .as_deref()

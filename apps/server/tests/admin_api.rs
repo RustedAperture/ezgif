@@ -340,6 +340,37 @@ async fn admin_search_finds_raw_discord_id_without_exposing_identity_values() {
 }
 
 #[tokio::test]
+async fn users_api_requires_manage_permissions() {
+    let fixture = admin_fixture().await;
+
+    let response = get_admin_users(&fixture.app, &fixture.normal_admin, "search-user").await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn users_api_allows_non_root_admin_with_manage_permissions() {
+    let fixture = admin_fixture().await;
+
+    assert_eq!(
+        patch_permission(
+            &fixture.app,
+            &fixture.root,
+            fixture.normal_admin.id,
+            "manage_permissions",
+            true,
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+
+    let response = get_admin_users(&fixture.app, &fixture.normal_admin, "search-user").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn only_root_admins_can_change_roles() {
     let fixture = admin_fixture().await;
     assert_eq!(
