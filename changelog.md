@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added an admin-only stats dashboard with aggregate totals and daily operational snapshots for overall usage and storage trends.
+- Added an admin-only stats dashboard with aggregate totals and UTC daily operational snapshots, including direct daily send activity and storage trends.
 
 ## v0.2.10 - Jul 17, 2026
 

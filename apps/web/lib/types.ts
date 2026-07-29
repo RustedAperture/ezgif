@@ -39,6 +39,7 @@ export type AdminStatsSnapshot = {
   image_link_count: number;
   unique_file_count: number | null;
   send_count: number;
+  daily_send_count: number;
   b2_object_count: number | null;
   b2_bytes: number | null;
 };

@@ -4,7 +4,7 @@ use memebucket_server::{
     config::{Config, connect_sqlite_pool, connect_sqlite_pool_for_migrations},
     discord::commands::command_definitions,
     router::build_router,
-    services::admin_stats::AdminStatsService,
+    services::admin_stats::{AdminStatsService, collect_admin_stats_once},
     services::migration::run_cdn_migration,
     services::storage::StorageService,
 };
@@ -163,7 +163,7 @@ async fn run_admin_stats_collector(service: Arc<AdminStatsService>) {
 async fn refresh_admin_stats_once(service: &AdminStatsService) {
     let snapshot_date = Utc::now().date_naive();
 
-    match service.refresh_snapshot(snapshot_date).await {
+    match collect_admin_stats_once(service, snapshot_date).await {
         Ok(result) => tracing::info!(
             snapshot_date = %snapshot_date,
             storage_available = result.storage_available,

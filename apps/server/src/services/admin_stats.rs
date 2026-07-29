@@ -69,3 +69,14 @@ impl AdminStatsService {
         self.repo.list_snapshots().await
     }
 }
+
+pub async fn collect_admin_stats_once(
+    service: &AdminStatsService,
+    snapshot_date: NaiveDate,
+) -> Result<RefreshSnapshotResult, sqlx::Error> {
+    service
+        .repo
+        .backfill_historical_snapshots(snapshot_date)
+        .await?;
+    service.refresh_snapshot(snapshot_date).await
+}

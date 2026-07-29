@@ -66,6 +66,7 @@ pub struct AdminStatsSnapshotResponse {
     pub image_link_count: i64,
     pub unique_file_count: Option<i64>,
     pub send_count: i64,
+    pub daily_send_count: i64,
     pub b2_object_count: Option<i64>,
     pub b2_bytes: Option<i64>,
 }
@@ -266,6 +267,7 @@ fn map_stats_snapshot(snapshot: AdminStatsSnapshot) -> AdminStatsSnapshotRespons
         image_link_count: snapshot.image_link_count,
         unique_file_count: snapshot.unique_file_count,
         send_count: snapshot.send_count,
+        daily_send_count: snapshot.daily_send_count,
         b2_object_count: snapshot.b2_object_count,
         b2_bytes: snapshot.b2_bytes,
     }

@@ -7,8 +7,8 @@ use axum::{
 use chrono::NaiveDate;
 use http_body_util::BodyExt;
 use memebucket_server::repositories::{
-    BucketRepo, ImageRepo, UserRepo, admin_stats::AdminStatsRepository, buckets::BucketRepository,
-    images::ImageRepository, users::UserRepository,
+    BucketRepo, ImageRepo, UserRepo, admin::AdminRepository, admin_stats::AdminStatsRepository,
+    buckets::BucketRepository, images::ImageRepository, users::UserRepository,
 };
 use memebucket_server::{
     app_state::AppState,
@@ -16,7 +16,10 @@ use memebucket_server::{
     config::RootAdminConfig,
     repositories::users::StoredUser,
     router::build_router_for_tests,
-    services::{admin_stats::AdminStatsService, storage::StorageService},
+    services::{
+        admin_stats::{AdminStatsService, collect_admin_stats_once},
+        storage::StorageService,
+    },
 };
 use object_store::{ObjectStoreExt, memory::InMemory, path::Path as ObjectPath};
 use sqlx::SqlitePool;
@@ -127,6 +130,7 @@ async fn refresh_current_snapshot_counts_service_wide_records() {
     assert_eq!(snapshot.bucket_count, 3);
     assert_eq!(snapshot.image_link_count, 4);
     assert_eq!(snapshot.send_count, 5);
+    assert_eq!(snapshot.daily_send_count, 5);
 }
 
 #[tokio::test]
@@ -149,12 +153,31 @@ async fn refreshing_same_day_updates_one_snapshot_row() {
 }
 
 #[tokio::test]
+async fn refreshing_current_day_updates_daily_send_count_as_sends_arrive() {
+    let pool = test_pool().await;
+    seed_stats_fixture(&pool).await;
+    let repo = AdminStatsRepository::new(pool.clone());
+    let date = NaiveDate::from_ymd_opt(2026, 7, 28).unwrap();
+
+    let initial = repo.refresh_current_snapshot(date).await.unwrap();
+    insert_send_for_fixture_user(&pool, "2026-07-28T06:00:00Z").await;
+    let refreshed = repo.refresh_current_snapshot(date).await.unwrap();
+
+    assert_eq!(initial.send_count, 5);
+    assert_eq!(initial.daily_send_count, 5);
+    assert_eq!(refreshed.send_count, 6);
+    assert_eq!(refreshed.daily_send_count, 6);
+}
+
+#[tokio::test]
 async fn historical_backfill_leaves_unavailable_file_metrics_null() {
     let pool = test_pool().await;
     seed_dated_stats_fixture(&pool).await;
     let repo = AdminStatsRepository::new(pool.clone());
 
-    repo.backfill_historical_snapshots().await.unwrap();
+    repo.backfill_historical_snapshots(NaiveDate::from_ymd_opt(2026, 7, 29).unwrap())
+        .await
+        .unwrap();
     let rows = repo.list_snapshots().await.unwrap();
     let july_26 = snapshot_on(&rows, NaiveDate::from_ymd_opt(2026, 7, 26).unwrap());
     let july_27 = snapshot_on(&rows, NaiveDate::from_ymd_opt(2026, 7, 27).unwrap());
@@ -164,6 +187,7 @@ async fn historical_backfill_leaves_unavailable_file_metrics_null() {
     assert_eq!(july_26.bucket_count, 0);
     assert_eq!(july_26.image_link_count, 0);
     assert_eq!(july_26.send_count, 0);
+    assert_eq!(july_26.daily_send_count, 0);
     assert!(july_26.unique_file_count.is_none());
     assert!(july_26.b2_object_count.is_none());
     assert!(july_26.b2_bytes.is_none());
@@ -172,6 +196,7 @@ async fn historical_backfill_leaves_unavailable_file_metrics_null() {
     assert_eq!(july_27.bucket_count, 1);
     assert_eq!(july_27.image_link_count, 0);
     assert_eq!(july_27.send_count, 0);
+    assert_eq!(july_27.daily_send_count, 0);
     assert!(july_27.unique_file_count.is_none());
     assert!(july_27.b2_object_count.is_none());
     assert!(july_27.b2_bytes.is_none());
@@ -180,6 +205,7 @@ async fn historical_backfill_leaves_unavailable_file_metrics_null() {
     assert_eq!(july_28.bucket_count, 1);
     assert_eq!(july_28.image_link_count, 1);
     assert_eq!(july_28.send_count, 1);
+    assert_eq!(july_28.daily_send_count, 1);
     assert!(july_28.unique_file_count.is_none());
     assert!(july_28.b2_object_count.is_none());
     assert!(july_28.b2_bytes.is_none());
@@ -201,6 +227,7 @@ async fn refreshing_same_day_updates_unique_file_count_to_zero_and_preserves_b2_
             image_link_count: 1,
             unique_file_count: Some(9),
             send_count: 1,
+            daily_send_count: 1,
             b2_object_count: Some(11),
             b2_bytes: Some(222),
         },
@@ -216,6 +243,7 @@ async fn refreshing_same_day_updates_unique_file_count_to_zero_and_preserves_b2_
     assert_eq!(refreshed.bucket_count, 3);
     assert_eq!(refreshed.image_link_count, 5);
     assert_eq!(refreshed.send_count, 5);
+    assert_eq!(refreshed.daily_send_count, 5);
     assert_eq!(refreshed.unique_file_count, Some(0));
     assert_eq!(refreshed.b2_object_count, Some(11));
     assert_eq!(refreshed.b2_bytes, Some(222));
@@ -227,7 +255,9 @@ async fn historical_backfill_uses_explicit_utc_dates_at_midnight_boundaries() {
     seed_explicit_utc_boundary_fixture(&pool).await;
     let repo = AdminStatsRepository::new(pool.clone());
 
-    repo.backfill_historical_snapshots().await.unwrap();
+    repo.backfill_historical_snapshots(NaiveDate::from_ymd_opt(2026, 7, 29).unwrap())
+        .await
+        .unwrap();
     let rows = repo.list_snapshots().await.unwrap();
     let july_27 = snapshot_on(&rows, NaiveDate::from_ymd_opt(2026, 7, 27).unwrap());
     let july_28 = snapshot_on(&rows, NaiveDate::from_ymd_opt(2026, 7, 28).unwrap());
@@ -235,12 +265,80 @@ async fn historical_backfill_uses_explicit_utc_dates_at_midnight_boundaries() {
     assert_eq!(july_27.user_count, 1);
     assert_eq!(july_27.bucket_count, 0);
     assert_eq!(july_27.image_link_count, 0);
-    assert_eq!(july_27.send_count, 0);
+    assert_eq!(july_27.send_count, 1);
+    assert_eq!(july_27.daily_send_count, 1);
 
     assert_eq!(july_28.user_count, 1);
     assert_eq!(july_28.bucket_count, 1);
     assert_eq!(july_28.image_link_count, 1);
-    assert_eq!(july_28.send_count, 1);
+    assert_eq!(july_28.send_count, 2);
+    assert_eq!(july_28.daily_send_count, 1);
+}
+
+#[tokio::test]
+async fn historical_backfill_does_not_rewrite_existing_rows_after_source_deletion() {
+    let pool = test_pool().await;
+    seed_dated_stats_fixture(&pool).await;
+    let repo = AdminStatsRepository::new(pool.clone());
+    let date = NaiveDate::from_ymd_opt(2026, 7, 28).unwrap();
+
+    repo.backfill_historical_snapshots(NaiveDate::from_ymd_opt(2026, 7, 29).unwrap())
+        .await
+        .unwrap();
+    let before = snapshot_on(&repo.list_snapshots().await.unwrap(), date).clone();
+
+    sqlx::query("DELETE FROM send_history")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM images")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    repo.backfill_historical_snapshots(NaiveDate::from_ymd_opt(2026, 7, 29).unwrap())
+        .await
+        .unwrap();
+    let after = snapshot_on(&repo.list_snapshots().await.unwrap(), date).clone();
+
+    assert_eq!(before.image_link_count, 1);
+    assert_eq!(before.send_count, 1);
+    assert_eq!(before.daily_send_count, 1);
+    assert_eq!(after, before);
+}
+
+#[tokio::test]
+async fn production_collection_backfills_history_before_current_day_refresh() {
+    let pool = test_pool().await;
+    seed_dated_stats_fixture(&pool).await;
+    sqlx::query(
+        "CREATE TRIGGER reject_current_admin_stats_snapshot
+         BEFORE INSERT ON admin_stats_snapshots
+         WHEN NEW.snapshot_date = '2026-07-29'
+         BEGIN
+             SELECT RAISE(ABORT, 'current snapshot rejected');
+         END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let service = AdminStatsService::new(AdminStatsRepository::new(pool.clone()), None);
+    let result =
+        collect_admin_stats_once(&service, NaiveDate::from_ymd_opt(2026, 7, 29).unwrap()).await;
+    let rows = snapshot_rows(&pool).await;
+
+    assert!(result.is_err());
+    assert!(rows.iter().any(|row| {
+        row.snapshot_date == NaiveDate::from_ymd_opt(2026, 7, 28).unwrap()
+            && row.unique_file_count.is_none()
+            && row.daily_send_count == 1
+    }));
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.snapshot_date == NaiveDate::from_ymd_opt(2026, 7, 29).unwrap())
+    );
 }
 
 #[tokio::test]
@@ -276,6 +374,7 @@ async fn refresh_snapshot_without_storage_keeps_database_metrics_available() {
     assert_eq!(refreshed.snapshot.image_link_count, 4);
     assert_eq!(refreshed.snapshot.unique_file_count, Some(1));
     assert_eq!(refreshed.snapshot.send_count, 5);
+    assert_eq!(refreshed.snapshot.daily_send_count, 5);
     assert!(refreshed.snapshot.b2_object_count.is_none());
     assert!(refreshed.snapshot.b2_bytes.is_none());
     assert!(!refreshed.storage_available);
@@ -298,6 +397,7 @@ async fn refresh_snapshot_with_storage_persists_provider_metrics_through_reposit
     let saved = snapshot_on(&history, date);
 
     assert_eq!(refreshed.snapshot.unique_file_count, Some(1));
+    assert_eq!(refreshed.snapshot.daily_send_count, 5);
     assert_eq!(refreshed.snapshot.b2_object_count, Some(2));
     assert_eq!(refreshed.snapshot.b2_bytes, Some(35));
     assert_eq!(saved.b2_object_count, Some(2));
@@ -323,6 +423,7 @@ async fn b2_listing_failure_preserves_last_known_snapshot() {
             image_link_count: 1,
             unique_file_count: Some(9),
             send_count: 1,
+            daily_send_count: 1,
             b2_object_count: Some(11),
             b2_bytes: Some(222),
         },
@@ -341,6 +442,7 @@ async fn b2_listing_failure_preserves_last_known_snapshot() {
     assert_eq!(refreshed.snapshot.image_link_count, 5);
     assert_eq!(refreshed.snapshot.unique_file_count, Some(2));
     assert_eq!(refreshed.snapshot.send_count, 5);
+    assert_eq!(refreshed.snapshot.daily_send_count, 5);
     assert_eq!(refreshed.snapshot.b2_object_count, Some(11));
     assert_eq!(refreshed.snapshot.b2_bytes, Some(222));
     assert!(!refreshed.storage_available);
@@ -358,6 +460,26 @@ async fn stats_requires_view_permission_for_normal_admin() {
 }
 
 #[tokio::test]
+async fn stats_allows_non_root_admin_with_view_permission() {
+    let fixture = stats_api_fixture().await;
+    AdminRepository::new(fixture.pool.clone())
+        .set_permission(fixture.normal_admin.id, "view_admin_stats", true)
+        .await
+        .unwrap();
+    let before_rows = snapshot_rows(&fixture.pool).await;
+
+    let response = get_stats(&fixture.app, &fixture.normal_admin).await;
+    let after_rows = snapshot_rows(&fixture.pool).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    assert_eq!(body["current"]["snapshot_date"], "2026-07-28");
+    assert_eq!(body["current"]["send_count"], 5);
+    assert_eq!(body["current"]["daily_send_count"], 5);
+    assert_eq!(after_rows, before_rows);
+}
+
+#[tokio::test]
 async fn stats_allows_root_admin_and_returns_aggregate_history() {
     let fixture = stats_api_fixture().await;
     let before_rows = snapshot_rows(&fixture.pool).await;
@@ -370,6 +492,7 @@ async fn stats_allows_root_admin_and_returns_aggregate_history() {
     let history = body["history"].as_array().unwrap();
 
     assert!(body["current"]["user_count"].is_number());
+    assert_eq!(body["current"]["daily_send_count"], 5);
     assert_eq!(body["current"]["snapshot_date"], "2026-07-28");
     assert!(body["history"].is_array());
     assert!(body["storage"]["configured"].is_boolean());
@@ -387,6 +510,7 @@ async fn stats_allows_root_admin_and_returns_aggregate_history() {
                 image_link_count: 4,
                 unique_file_count: Some(0),
                 send_count: 5,
+                daily_send_count: 5,
                 b2_object_count: None,
                 b2_bytes: None,
             },
@@ -397,6 +521,7 @@ async fn stats_allows_root_admin_and_returns_aggregate_history() {
                 image_link_count: 4,
                 unique_file_count: Some(0),
                 send_count: 5,
+                daily_send_count: 0,
                 b2_object_count: None,
                 b2_bytes: None,
             },
@@ -526,6 +651,37 @@ async fn insert_image_for_fixture_user(pool: &SqlitePool) {
         .unwrap();
 }
 
+async fn insert_send_for_fixture_user(pool: &SqlitePool, sent_at: &str) {
+    let (owner_id, bucket_id, bucket_name, image_id, image_url): (
+        String,
+        String,
+        String,
+        String,
+        String,
+    ) = sqlx::query_as(
+        "SELECT buckets.owner_user_id, buckets.id, buckets.name, images.id, images.url
+         FROM buckets
+         JOIN images ON images.bucket_id = buckets.id
+         WHERE buckets.name = 'Owner One Primary'
+         ORDER BY images.created_at
+         LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    insert_send(
+        pool,
+        Uuid::parse_str(&owner_id).unwrap(),
+        Uuid::parse_str(&bucket_id).unwrap(),
+        Uuid::parse_str(&image_id).unwrap(),
+        &bucket_name,
+        &image_url,
+        sent_at,
+    )
+    .await;
+}
+
 async fn seed_dated_stats_fixture(pool: &SqlitePool) {
     let users = UserRepository::new(pool.clone());
     let buckets = BucketRepository::new(pool.clone());
@@ -612,6 +768,16 @@ async fn seed_explicit_utc_boundary_fixture(pool: &SqlitePool) {
         image.id,
         &bucket.name,
         &image.url,
+        "2026-07-27T23:59:59Z",
+    )
+    .await;
+    insert_send(
+        pool,
+        owner.id,
+        bucket.id,
+        image.id,
+        &bucket.name,
+        &image.url,
         "2026-07-28T00:00:02Z",
     )
     .await;
@@ -658,6 +824,7 @@ struct SnapshotSeed {
     image_link_count: i64,
     unique_file_count: Option<i64>,
     send_count: i64,
+    daily_send_count: i64,
     b2_object_count: Option<i64>,
     b2_bytes: Option<i64>,
 }
@@ -665,8 +832,8 @@ struct SnapshotSeed {
 async fn seed_snapshot_row(pool: &SqlitePool, date: NaiveDate, seed: SnapshotSeed) {
     sqlx::query(
         "INSERT INTO admin_stats_snapshots
-            (snapshot_date, user_count, bucket_count, image_link_count, unique_file_count, send_count, b2_object_count, b2_bytes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (snapshot_date, user_count, bucket_count, image_link_count, unique_file_count, send_count, daily_send_count, b2_object_count, b2_bytes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(date.to_string())
     .bind(seed.user_count)
@@ -674,6 +841,7 @@ async fn seed_snapshot_row(pool: &SqlitePool, date: NaiveDate, seed: SnapshotSee
     .bind(seed.image_link_count)
     .bind(seed.unique_file_count)
     .bind(seed.send_count)
+    .bind(seed.daily_send_count)
     .bind(seed.b2_object_count)
     .bind(seed.b2_bytes)
     .execute(pool)

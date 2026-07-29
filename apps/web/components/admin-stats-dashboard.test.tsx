@@ -107,13 +107,13 @@ function isoDate(date: Date) {
 function buildHistory(days: number) {
   const end = new Date("2026-07-28T00:00:00.000Z");
   const history: AdminStatsSnapshot[] = [];
-  let sendCount = 0;
+  let sendCount = 1_000;
 
   for (let index = 0; index < days; index += 1) {
     const date = new Date(end);
     date.setUTCDate(end.getUTCDate() - (days - 1 - index));
     const dailySends = (index % 4) + 1;
-    sendCount += dailySends;
+    sendCount += 10;
 
     history.push({
       snapshot_date: isoDate(date),
@@ -122,6 +122,7 @@ function buildHistory(days: number) {
       image_link_count: 500 + index * 2,
       unique_file_count: 900 + index,
       send_count: sendCount,
+      daily_send_count: dailySends,
       b2_object_count: 1200 + index,
       b2_bytes: 1024 * (index + 1),
     });
@@ -181,7 +182,7 @@ describe("AdminStatsDashboard", () => {
     expect(chartData[29]).toEqual({ date: "2026-07-28", value: 219 });
   });
 
-  it("maps sends to per-day values and supports 7, 30, 90, and all ranges", async () => {
+  it("charts explicit daily sends and supports 7, 30, 90, and all ranges", async () => {
     const response = buildResponse();
     mocks.apiGet.mockResolvedValue(response);
 
@@ -226,14 +227,27 @@ describe("AdminStatsDashboard", () => {
     expect(screen.queryByTestId("bar-chart")).toBeNull();
   });
 
+  it("shows a request error when the stats request is rejected", async () => {
+    mocks.apiGet.mockRejectedValue(new Error("request failed"));
+
+    render(<AdminStatsDashboard />);
+
+    await screen.findByText("Admin stats unavailable");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Could not load admin stats. Try again.",
+    );
+  });
+
   it("shows an empty-history state when the API has no snapshots to chart", async () => {
     mocks.apiGet.mockResolvedValue(buildResponse({ history: [] }));
 
     render(<AdminStatsDashboard />);
 
-    await screen.findByText("No historical snapshots yet.");
+    const emptyHistoryTitle = await screen.findByText("No historical snapshots yet.");
     expect(screen.queryByTestId("line-chart")).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("No historical snapshots yet.");
+    expect(emptyHistoryTitle.closest('[role="alert"]')?.textContent).toContain(
+      "No historical snapshots yet.",
+    );
   });
 
   it("keeps null storage history values blank and explains when storage metrics are unavailable", async () => {
@@ -258,6 +272,22 @@ describe("AdminStatsDashboard", () => {
     expect(screen.getAllByText("Unique files").length).toBeGreaterThan(0);
     expect(screen.getAllByText("B2 objects").length).toBeGreaterThan(0);
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
-    expect(screen.getByRole("alert").textContent).toContain("Complete storage history begins on 2026-07-10.");
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
+    expect(screen.getByText("Complete storage history begins on 2026-07-10.")).toBeTruthy();
+  });
+
+  it("shows the healthy storage history start when the latest snapshot is available", async () => {
+    mocks.apiGet.mockResolvedValue(buildResponse({
+      storage: {
+        configured: true,
+        available: true,
+        first_complete_history_date: "2026-07-10",
+      },
+    }));
+
+    render(<AdminStatsDashboard />);
+
+    await screen.findByText("Complete storage history begins on 2026-07-10.");
+    expect(screen.queryByText("Storage metrics are not available for the latest snapshot yet.")).toBeNull();
   });
 });

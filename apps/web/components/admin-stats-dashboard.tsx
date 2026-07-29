@@ -36,6 +36,7 @@ type MetricKey =
   | "image_link_count"
   | "unique_file_count"
   | "send_count"
+  | "daily_send_count"
   | "b2_object_count"
   | "b2_bytes"
 
@@ -65,7 +66,7 @@ const METRIC_OPTIONS: Array<{ value: MetricKey; label: string; chartType: "line"
   { value: "bucket_count", label: "Buckets", chartType: "line" },
   { value: "image_link_count", label: "Image links", chartType: "line" },
   { value: "unique_file_count", label: "Unique files", chartType: "line" },
-  { value: "send_count", label: "Sends", chartType: "bar" },
+  { value: "daily_send_count", label: "Sends", chartType: "bar" },
   { value: "b2_object_count", label: "B2 objects", chartType: "line" },
   { value: "b2_bytes", label: "B2 storage", chartType: "line" },
 ]
@@ -132,20 +133,10 @@ function isoDateOffset(baseDate: string, offsetDays: number) {
 }
 
 function buildChartRows(history: AdminStatsSnapshot[], metric: MetricKey) {
-  return history.map((snapshot, index) => {
-    if (metric === "send_count") {
-      const previous = history[index - 1]
-      return {
-        date: snapshot.snapshot_date,
-        value: previous ? snapshot.send_count - previous.send_count : snapshot.send_count,
-      }
-    }
-
-    return {
-      date: snapshot.snapshot_date,
-      value: snapshotValue(snapshot, metric),
-    }
-  })
+  return history.map((snapshot) => ({
+    date: snapshot.snapshot_date,
+    value: snapshotValue(snapshot, metric),
+  }))
 }
 
 function filterRows(rows: ChartRow[], endDate: string, range: RangeKey) {
@@ -210,13 +201,10 @@ export function AdminStatsDashboard() {
   }, [])
 
   const selectedMetric = METRIC_OPTIONS.find((option) => option.value === metric) ?? METRIC_OPTIONS[0]
-  const chartRows = React.useMemo(() => {
-    if (!stats || stats.history.length === 0) {
-      return []
-    }
-
-    return filterRows(buildChartRows(stats.history, metric), stats.current.snapshot_date, range)
-  }, [metric, range, stats])
+  const chartRows =
+    !stats || stats.history.length === 0
+      ? []
+      : filterRows(buildChartRows(stats.history, metric), stats.current.snapshot_date, range)
 
   if (loading) {
     return (
@@ -289,9 +277,16 @@ export function AdminStatsDashboard() {
         <Alert>
           <AlertTitle>{storageNotice}</AlertTitle>
           <AlertDescription>
-            {stats.storage.first_complete_history_date
-              ? `Complete storage history begins on ${stats.storage.first_complete_history_date}.`
-              : "Complete storage history is not available yet."}
+            Database metrics remain available while storage metrics recover.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {stats.storage.first_complete_history_date ? (
+        <Alert>
+          <AlertTitle>Storage history</AlertTitle>
+          <AlertDescription>
+            Complete storage history begins on {stats.storage.first_complete_history_date}.
           </AlertDescription>
         </Alert>
       ) : null}
