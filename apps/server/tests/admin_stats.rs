@@ -342,6 +342,204 @@ async fn production_collection_backfills_history_before_current_day_refresh() {
 }
 
 #[tokio::test]
+async fn production_collection_finalizes_previous_current_day_at_next_utc_boundary() {
+    let pool = test_pool().await;
+    seed_dated_stats_fixture(&pool).await;
+    let storage = test_storage_with_objects(test_pool().await, &[("day-d.webp", 10)]).await;
+    let service = AdminStatsService::new(AdminStatsRepository::new(pool.clone()), Some(storage));
+    let day_d = NaiveDate::from_ymd_opt(2026, 7, 28).unwrap();
+
+    collect_admin_stats_once(&service, day_d).await.unwrap();
+
+    insert_cdn_object(
+        &pool,
+        "late-day-d-hash",
+        "https://cdn.example.com/late-day-d.webp",
+    )
+    .await;
+    let users = UserRepository::new(pool.clone());
+    let buckets = BucketRepository::new(pool.clone());
+    let images = ImageRepository::new(pool.clone());
+    let late_owner = users
+        .upsert_by_provider("discord", "late-day-d-owner", Some("Late Day D"), None)
+        .await
+        .unwrap();
+    let late_bucket = buckets
+        .create(late_owner.id, "Late Day D Bucket")
+        .await
+        .unwrap();
+    let late_image = images
+        .create(
+            late_owner.id,
+            late_bucket.id,
+            "https://example.com/late-day-d.gif",
+        )
+        .await
+        .unwrap();
+    set_timestamp(
+        &pool,
+        "users",
+        late_owner.id,
+        "2026-07-28T23:59:56Z",
+        Some("updated_at"),
+    )
+    .await;
+    set_timestamp(
+        &pool,
+        "buckets",
+        late_bucket.id,
+        "2026-07-28T23:59:57Z",
+        Some("updated_at"),
+    )
+    .await;
+    set_timestamp(&pool, "images", late_image.id, "2026-07-28T23:59:58Z", None).await;
+    insert_send(
+        &pool,
+        late_owner.id,
+        late_bucket.id,
+        late_image.id,
+        &late_bucket.name,
+        &late_image.url,
+        "2026-07-28T23:59:59Z",
+    )
+    .await;
+
+    collect_admin_stats_once(&service, NaiveDate::from_ymd_opt(2026, 7, 29).unwrap())
+        .await
+        .unwrap();
+    let rows = service.load_history().await.unwrap();
+    let completed_day_d = snapshot_on(&rows, day_d);
+
+    assert_eq!(completed_day_d.user_count, 2);
+    assert_eq!(completed_day_d.bucket_count, 2);
+    assert_eq!(completed_day_d.image_link_count, 2);
+    assert_eq!(completed_day_d.send_count, 2);
+    assert_eq!(completed_day_d.daily_send_count, 2);
+    assert_eq!(completed_day_d.unique_file_count, Some(0));
+    assert_eq!(completed_day_d.b2_object_count, Some(1));
+    assert_eq!(completed_day_d.b2_bytes, Some(10));
+}
+
+#[tokio::test]
+async fn repeated_collection_does_not_refinalize_completed_day_after_source_deletion() {
+    let pool = test_pool().await;
+    seed_stats_fixture(&pool).await;
+    let service = AdminStatsService::new(AdminStatsRepository::new(pool.clone()), None);
+    let day_d = NaiveDate::from_ymd_opt(2026, 7, 28).unwrap();
+    let day_d_plus_one = NaiveDate::from_ymd_opt(2026, 7, 29).unwrap();
+
+    collect_admin_stats_once(&service, day_d).await.unwrap();
+    insert_send_for_fixture_user(&pool, "2026-07-28T23:59:59Z").await;
+    collect_admin_stats_once(&service, day_d_plus_one)
+        .await
+        .unwrap();
+    let completed_before_deletion =
+        snapshot_on(&service.load_history().await.unwrap(), day_d).clone();
+
+    sqlx::query("DELETE FROM send_history")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM images")
+        .execute(&pool)
+        .await
+        .unwrap();
+    collect_admin_stats_once(&service, day_d_plus_one)
+        .await
+        .unwrap();
+    let completed_after_deletion =
+        snapshot_on(&service.load_history().await.unwrap(), day_d).clone();
+
+    assert_eq!(completed_before_deletion.send_count, 6);
+    assert_eq!(completed_before_deletion.daily_send_count, 6);
+    assert_eq!(completed_after_deletion, completed_before_deletion);
+}
+
+#[tokio::test]
+async fn follow_up_migration_upgrades_databases_that_already_applied_0018() {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::query(include_str!("../migrations/0018_admin_stats_snapshots.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let legacy_columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('admin_stats_snapshots')")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+
+    assert!(
+        !legacy_columns
+            .iter()
+            .any(|column| column == "daily_send_count")
+    );
+    assert!(!legacy_columns.iter().any(|column| column == "finalized"));
+
+    let historical_date = NaiveDate::from_ymd_opt(2026, 7, 27).unwrap();
+    let date = NaiveDate::from_ymd_opt(2026, 7, 28).unwrap();
+    sqlx::query(
+        "INSERT INTO admin_stats_snapshots
+            (snapshot_date, user_count, bucket_count, image_link_count, unique_file_count,
+             send_count, b2_object_count, b2_bytes)
+         VALUES
+            ('2026-07-27', 1, 1, 1, NULL, 1, NULL, NULL),
+            ('2026-07-28', 1, 2, 3, 4, 5, 7, 8)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let migration_path = format!(
+        "{}/migrations/0019_admin_stats_snapshot_finalization.sql",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let migration_sql = std::fs::read_to_string(migration_path).unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(migration_sql))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let upgraded: MigratedSnapshotRow = sqlx::query_as(
+        "SELECT user_count, bucket_count, image_link_count, unique_file_count,
+                    send_count, daily_send_count, b2_object_count, b2_bytes, finalized
+             FROM admin_stats_snapshots
+             WHERE snapshot_date = ?",
+    )
+    .bind(date.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let historical_state: (i64, bool) = sqlx::query_as(
+        "SELECT daily_send_count, finalized
+         FROM admin_stats_snapshots
+         WHERE snapshot_date = ?",
+    )
+    .bind(historical_date.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        upgraded,
+        MigratedSnapshotRow {
+            user_count: 1,
+            bucket_count: 2,
+            image_link_count: 3,
+            unique_file_count: Some(4),
+            send_count: 5,
+            daily_send_count: 0,
+            b2_object_count: Some(7),
+            b2_bytes: Some(8),
+            finalized: false,
+        }
+    );
+    assert_eq!(historical_state, (0, true));
+}
+
+#[tokio::test]
 async fn storage_stats_sums_object_metadata_without_downloading_objects() {
     let storage = test_storage_with_objects(
         test_pool().await,
@@ -827,6 +1025,19 @@ struct SnapshotSeed {
     daily_send_count: i64,
     b2_object_count: Option<i64>,
     b2_bytes: Option<i64>,
+}
+
+#[derive(Debug, PartialEq, Eq, sqlx::FromRow)]
+struct MigratedSnapshotRow {
+    user_count: i64,
+    bucket_count: i64,
+    image_link_count: i64,
+    unique_file_count: Option<i64>,
+    send_count: i64,
+    daily_send_count: i64,
+    b2_object_count: Option<i64>,
+    b2_bytes: Option<i64>,
+    finalized: bool,
 }
 
 async fn seed_snapshot_row(pool: &SqlitePool, date: NaiveDate, seed: SnapshotSeed) {

@@ -94,6 +94,48 @@ impl AdminStatsRepository {
         Ok(())
     }
 
+    pub async fn finalize_snapshots_before(
+        &self,
+        current_date: NaiveDate,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE admin_stats_snapshots
+             SET user_count = (
+                     SELECT COUNT(*)
+                     FROM users
+                     WHERE date(users.created_at) <= admin_stats_snapshots.snapshot_date
+                 ),
+                 bucket_count = (
+                     SELECT COUNT(*)
+                     FROM buckets
+                     WHERE date(buckets.created_at) <= admin_stats_snapshots.snapshot_date
+                 ),
+                 image_link_count = (
+                     SELECT COUNT(*)
+                     FROM images
+                     WHERE date(images.created_at) <= admin_stats_snapshots.snapshot_date
+                 ),
+                 send_count = (
+                     SELECT COUNT(*)
+                     FROM send_history
+                     WHERE date(send_history.sent_at) <= admin_stats_snapshots.snapshot_date
+                 ),
+                 daily_send_count = (
+                     SELECT COUNT(*)
+                     FROM send_history
+                     WHERE date(send_history.sent_at) = admin_stats_snapshots.snapshot_date
+                 ),
+                 finalized = 1
+             WHERE finalized = 0
+               AND snapshot_date < ?",
+        )
+        .bind(current_date.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn list_snapshots(&self) -> Result<Vec<AdminStatsSnapshot>, sqlx::Error> {
         let rows: Vec<SnapshotRow> = sqlx::query_as(
             "SELECT snapshot_date, user_count, bucket_count, image_link_count, unique_file_count, send_count, daily_send_count, b2_object_count, b2_bytes
@@ -116,7 +158,8 @@ impl AdminStatsRepository {
             "UPDATE admin_stats_snapshots
              SET b2_object_count = COALESCE(?, b2_object_count),
                  b2_bytes = COALESCE(?, b2_bytes)
-             WHERE snapshot_date = ?",
+             WHERE snapshot_date = ?
+               AND finalized = 0",
         )
         .bind(b2_object_count)
         .bind(b2_bytes)
@@ -177,8 +220,8 @@ async fn upsert_current_snapshot(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO admin_stats_snapshots
-            (snapshot_date, user_count, bucket_count, image_link_count, unique_file_count, send_count, daily_send_count, b2_object_count, b2_bytes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (snapshot_date, user_count, bucket_count, image_link_count, unique_file_count, send_count, daily_send_count, b2_object_count, b2_bytes, finalized)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
          ON CONFLICT(snapshot_date) DO UPDATE SET
             user_count = excluded.user_count,
             bucket_count = excluded.bucket_count,
@@ -187,7 +230,8 @@ async fn upsert_current_snapshot(
             send_count = excluded.send_count,
             daily_send_count = excluded.daily_send_count,
             b2_object_count = COALESCE(excluded.b2_object_count, admin_stats_snapshots.b2_object_count),
-            b2_bytes = COALESCE(excluded.b2_bytes, admin_stats_snapshots.b2_bytes)",
+            b2_bytes = COALESCE(excluded.b2_bytes, admin_stats_snapshots.b2_bytes),
+            finalized = 0",
     )
     .bind(snapshot.snapshot_date.to_string())
     .bind(snapshot.user_count)
@@ -210,8 +254,8 @@ async fn insert_historical_snapshot(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO admin_stats_snapshots
-            (snapshot_date, user_count, bucket_count, image_link_count, unique_file_count, send_count, daily_send_count, b2_object_count, b2_bytes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (snapshot_date, user_count, bucket_count, image_link_count, unique_file_count, send_count, daily_send_count, b2_object_count, b2_bytes, finalized)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
          ON CONFLICT(snapshot_date) DO NOTHING",
     )
     .bind(snapshot.snapshot_date.to_string())

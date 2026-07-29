@@ -76,6 +76,10 @@ pub async fn collect_admin_stats_once(
 ) -> Result<RefreshSnapshotResult, sqlx::Error> {
     service
         .repo
+        .finalize_snapshots_before(snapshot_date)
+        .await?;
+    service
+        .repo
         .backfill_historical_snapshots(snapshot_date)
         .await?;
     service.refresh_snapshot(snapshot_date).await
