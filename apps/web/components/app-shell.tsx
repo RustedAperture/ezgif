@@ -6,13 +6,20 @@ import { AccountModal } from "./account-modal";
 import { ThemeToggle } from "./theme-toggle";
 import { useUser } from "./user-provider";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  contentAs = "main",
+}: {
+  children: React.ReactNode;
+  contentAs?: "main" | "div";
+}) {
   const { user } = useUser();
   const canManagePermissions =
     user?.role === "admin" && (user.permissions.manage_permissions || user.is_root_admin);
   const canViewAdminStats =
     user?.role === "admin" && (user.permissions.view_admin_stats || user.is_root_admin);
   const adminHref = canManagePermissions ? "/admin/users" : canViewAdminStats ? "/admin/stats" : null;
+  const ContentTag = contentAs;
   
   return (
     <div className="h-[100dvh] flex flex-col bg-background text-foreground overflow-hidden">
@@ -48,9 +55,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
-      <main className="flex-1 flex flex-col min-h-0 mx-auto w-full max-w-5xl px-4 pt-8 pb-4 overflow-y-auto overflow-x-hidden 2xl:w-2/3 2xl:max-w-none">
+      <ContentTag className="flex-1 flex flex-col min-h-0 mx-auto w-full max-w-5xl px-4 pt-8 pb-4 overflow-y-auto overflow-x-hidden 2xl:w-2/3 2xl:max-w-none">
         {children}
-      </main>
+      </ContentTag>
       <footer className="border-t">
         <div className="container mx-auto flex w-full max-w-5xl flex-col gap-3 px-4 py-5 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between 2xl:w-2/3 2xl:max-w-none">
           <p>memeBucket</p>

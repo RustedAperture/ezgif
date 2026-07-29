@@ -3,7 +3,7 @@ import { AppShell } from "@/components/app-shell";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AppShell>
+    <AppShell contentAs="div">
       <AdminAreaLayout>{children}</AdminAreaLayout>
     </AppShell>
   );
