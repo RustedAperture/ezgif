@@ -17,7 +17,7 @@ export function AnimatedMetricValue({
   className,
 }: AnimatedMetricValueProps) {
   const shouldReduceMotion = useReducedMotion();
-  const [displayValue, setDisplayValue] = useState(value ?? 0);
+  const [displayValue, setDisplayValue] = useState(0);
 
   useEffect(() => {
     if (value == null || shouldReduceMotion) {
@@ -35,13 +35,13 @@ export function AnimatedMetricValue({
   }, [duration, shouldReduceMotion, value]);
 
   return (
-    <motion.span
-      className={className}
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      {value == null ? "—" : formatValue(displayValue)}
-    </motion.span>
+    <>
+      <motion.span className={className} aria-hidden="true">
+        {value == null ? "—" : formatValue(displayValue)}
+      </motion.span>
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {value == null ? "—" : formatValue(value)}
+      </span>
+    </>
   );
 }
