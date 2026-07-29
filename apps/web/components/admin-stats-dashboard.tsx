@@ -14,6 +14,7 @@ import {
 import { apiGet } from "@/lib/api"
 import type { AdminStatsResponse, AdminStatsSnapshot } from "@/lib/types"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { AnimatedMetricValue } from "@/components/animated-metric-value"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   ChartContainer,
@@ -260,13 +261,17 @@ export function AdminStatsDashboard() {
           const formatter = summaryMetric.format ?? formatNumber
 
           return (
-            <Card key={summaryMetric.key}>
+            <Card key={summaryMetric.key} className="flex h-full flex-col">
               <CardHeader>
                 <CardTitle>{summaryMetric.label}</CardTitle>
                 <CardDescription>{summaryMetric.description}</CardDescription>
               </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-semibold tracking-tight">{formatter(value)}</p>
+              <CardContent className="mt-auto">
+                <AnimatedMetricValue
+                  value={value}
+                  formatValue={formatter}
+                  className="text-3xl font-semibold tracking-tight"
+                />
               </CardContent>
             </Card>
           )

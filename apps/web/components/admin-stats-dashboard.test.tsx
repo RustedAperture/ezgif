@@ -170,7 +170,9 @@ describe("AdminStatsDashboard", () => {
     await waitFor(() => expect(mocks.apiGet).toHaveBeenCalledWith("/api/admin/stats"));
 
     expect(screen.getAllByText("Users").length).toBeGreaterThan(0);
-    expect(screen.getByText("219")).toBeTruthy();
+    const usersValue = screen.getByText("219");
+    expect(usersValue.getAttribute("role")).toBe("status");
+    expect(usersValue.closest('[data-slot="card-content"]')?.classList.contains("mt-auto")).toBe(true);
     expect(screen.getAllByText("Buckets").length).toBeGreaterThan(0);
     expect(screen.getByText("169")).toBeTruthy();
     expect(screen.getAllByText("B2 storage").length).toBeGreaterThan(0);
