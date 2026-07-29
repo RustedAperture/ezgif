@@ -3,7 +3,10 @@ use memebucket_server::repositories::{
     BucketRepo, ImageRepo, UserRepo, admin_stats::AdminStatsRepository, buckets::BucketRepository,
     images::ImageRepository, users::UserRepository,
 };
+use memebucket_server::services::{admin_stats::AdminStatsService, storage::StorageService};
+use object_store::{ObjectStoreExt, memory::InMemory, path::Path as ObjectPath};
 use sqlx::SqlitePool;
+use std::sync::Arc;
 use uuid::Uuid;
 
 async fn test_pool() -> SqlitePool {
@@ -141,6 +144,105 @@ async fn historical_backfill_uses_explicit_utc_dates_at_midnight_boundaries() {
     assert_eq!(july_28.bucket_count, 1);
     assert_eq!(july_28.image_link_count, 1);
     assert_eq!(july_28.send_count, 1);
+}
+
+#[tokio::test]
+async fn storage_stats_sums_object_metadata_without_downloading_objects() {
+    let storage =
+        test_storage_with_objects(test_pool().await, &[("a.webp", 10), ("b.webp", 25)]).await;
+
+    let stats = storage.list_stats().await.unwrap();
+
+    assert_eq!(stats.object_count, 2);
+    assert_eq!(stats.bytes, 35);
+}
+
+#[tokio::test]
+async fn refresh_snapshot_without_storage_keeps_database_metrics_available() {
+    let pool = test_pool().await;
+    seed_stats_fixture(&pool).await;
+    insert_cdn_object(&pool, "fixture-hash-a", "https://cdn.example.com/a.webp").await;
+
+    let repo = AdminStatsRepository::new(pool.clone());
+    let service = AdminStatsService::new(repo, None);
+
+    let refreshed = service
+        .refresh_snapshot(NaiveDate::from_ymd_opt(2026, 7, 28).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(refreshed.snapshot.user_count, 2);
+    assert_eq!(refreshed.snapshot.bucket_count, 3);
+    assert_eq!(refreshed.snapshot.image_link_count, 4);
+    assert_eq!(refreshed.snapshot.unique_file_count, Some(1));
+    assert_eq!(refreshed.snapshot.send_count, 5);
+    assert!(refreshed.snapshot.b2_object_count.is_none());
+    assert!(refreshed.snapshot.b2_bytes.is_none());
+    assert!(!refreshed.storage_available);
+}
+
+#[tokio::test]
+async fn refresh_snapshot_with_storage_records_b2_metrics() {
+    let pool = test_pool().await;
+    seed_stats_fixture(&pool).await;
+    insert_cdn_object(&pool, "fixture-hash-a", "https://cdn.example.com/a.webp").await;
+
+    let repo = AdminStatsRepository::new(pool.clone());
+    let storage = test_storage_with_objects(pool.clone(), &[("a.webp", 10), ("b.webp", 25)]).await;
+    let service = AdminStatsService::new(repo, Some(storage));
+
+    let refreshed = service
+        .refresh_snapshot(NaiveDate::from_ymd_opt(2026, 7, 28).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(refreshed.snapshot.unique_file_count, Some(1));
+    assert_eq!(refreshed.snapshot.b2_object_count, Some(2));
+    assert_eq!(refreshed.snapshot.b2_bytes, Some(35));
+    assert!(refreshed.storage_available);
+}
+
+#[tokio::test]
+async fn b2_listing_failure_preserves_last_known_snapshot() {
+    let pool = test_pool().await;
+    seed_stats_fixture(&pool).await;
+    insert_cdn_object(&pool, "fixture-hash-a", "https://cdn.example.com/a.webp").await;
+    insert_cdn_object(&pool, "fixture-hash-b", "https://cdn.example.com/b.webp").await;
+    insert_image_for_fixture_user(&pool).await;
+    let date = NaiveDate::from_ymd_opt(2026, 7, 28).unwrap();
+
+    seed_snapshot_row(
+        &pool,
+        date,
+        SnapshotSeed {
+            user_count: 1,
+            bucket_count: 1,
+            image_link_count: 1,
+            unique_file_count: Some(9),
+            send_count: 1,
+            b2_object_count: Some(11),
+            b2_bytes: Some(222),
+        },
+    )
+    .await;
+
+    let repo = AdminStatsRepository::new(pool.clone());
+    let service = AdminStatsService::new(repo, Some(failing_list_storage(pool.clone()).await));
+
+    let refreshed = service.refresh_snapshot(date).await.unwrap();
+    let history = service.load_history().await.unwrap();
+    let saved = snapshot_on(&history, date);
+
+    assert_eq!(refreshed.snapshot.user_count, 2);
+    assert_eq!(refreshed.snapshot.bucket_count, 3);
+    assert_eq!(refreshed.snapshot.image_link_count, 5);
+    assert_eq!(refreshed.snapshot.unique_file_count, Some(2));
+    assert_eq!(refreshed.snapshot.send_count, 5);
+    assert_eq!(refreshed.snapshot.b2_object_count, Some(11));
+    assert_eq!(refreshed.snapshot.b2_bytes, Some(222));
+    assert!(!refreshed.storage_available);
+    assert_eq!(saved.b2_object_count, Some(11));
+    assert_eq!(saved.b2_bytes, Some(222));
 }
 
 async fn seed_stats_fixture(pool: &SqlitePool) {
@@ -349,6 +451,31 @@ async fn seed_explicit_utc_boundary_fixture(pool: &SqlitePool) {
         "2026-07-28T00:00:02Z",
     )
     .await;
+}
+
+async fn test_storage_with_objects(pool: SqlitePool, objects: &[(&str, usize)]) -> StorageService {
+    let store = Arc::new(InMemory::new());
+
+    for (key, size) in objects {
+        store
+            .put(&ObjectPath::from(*key), vec![b'x'; *size].into())
+            .await
+            .unwrap();
+    }
+
+    StorageService::new_with_store(store, "https://cdn.example.com", pool)
+}
+
+async fn failing_list_storage(pool: SqlitePool) -> StorageService {
+    StorageService::new(
+        "fixture-bucket",
+        "127.0.0.1:1",
+        "fixture-key-id",
+        "fixture-app-key",
+        "https://cdn.example.com",
+        pool,
+    )
+    .unwrap()
 }
 
 fn snapshot_on(

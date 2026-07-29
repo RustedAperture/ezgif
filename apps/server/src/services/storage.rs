@@ -16,6 +16,12 @@ pub enum StorageError {
     UploadFailed(String),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageStats {
+    pub object_count: i64,
+    pub bytes: i64,
+}
+
 #[derive(Clone)]
 pub struct StorageService {
     store: Arc<dyn ObjectStore>,
@@ -74,6 +80,36 @@ impl StorageService {
 
     pub fn is_bluesky_media(url: &str) -> bool {
         url_host_matches(url, &["cdn.bsky.app"])
+    }
+
+    pub async fn list_stats(&self) -> Result<StorageStats, StorageError> {
+        let listing = self
+            .store
+            .list_with_delimiter(None)
+            .await
+            .map_err(|error| {
+                tracing::error!("B2 stats listing failed: {error}");
+                StorageError::UploadFailed("storage stats listing failed".to_string())
+            })?;
+
+        let object_count = i64::try_from(listing.objects.len())
+            .map_err(|_| StorageError::UploadFailed("storage stats overflowed".to_string()))?;
+        let bytes = listing.objects.into_iter().try_fold(0_i64, |total, meta| {
+            let size = i64::try_from(meta.size)
+                .map_err(|_| StorageError::UploadFailed("storage stats overflowed".to_string()))?;
+            total
+                .checked_add(size)
+                .ok_or_else(|| StorageError::UploadFailed("storage stats overflowed".to_string()))
+        })?;
+
+        Ok(StorageStats {
+            object_count,
+            bytes,
+        })
+    }
+
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     /// Fetches `url` and re-hosts it on B2. Goes through the same SSRF-safe
