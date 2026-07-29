@@ -43,7 +43,7 @@ impl AdminStatsRepository {
             user_count: total_users(&self.pool).await?,
             bucket_count: total_buckets(&self.pool).await?,
             image_link_count: total_images(&self.pool).await?,
-            unique_file_count: Some(total_cdn_objects(&self.pool).await?),
+            unique_file_count: current_unique_file_count(&self.pool).await?,
             send_count: total_sends(&self.pool).await?,
             b2_object_count: None,
             b2_bytes: None,
@@ -214,10 +214,11 @@ async fn total_images(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
         .await
 }
 
-async fn total_cdn_objects(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM cdn_objects")
+async fn current_unique_file_count(pool: &SqlitePool) -> Result<Option<i64>, sqlx::Error> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cdn_objects")
         .fetch_one(pool)
-        .await
+        .await?;
+    Ok((count > 0).then_some(count))
 }
 
 async fn total_sends(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
