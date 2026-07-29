@@ -1,15 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { LayoutDashboard, FolderOpen, Search, Download, Shield, ChartColumn } from "lucide-react";
+import { LayoutDashboard, FolderOpen, Search, Download, Shield } from "lucide-react";
 import { AccountModal } from "./account-modal";
 import { ThemeToggle } from "./theme-toggle";
 import { useUser } from "./user-provider";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
+  const canManagePermissions =
+    user?.role === "admin" && (user.permissions.manage_permissions || user.is_root_admin);
   const canViewAdminStats =
     user?.role === "admin" && (user.permissions.view_admin_stats || user.is_root_admin);
+  const adminHref = canManagePermissions ? "/admin/users" : canViewAdminStats ? "/admin/stats" : null;
   
   return (
     <div className="h-[100dvh] flex flex-col bg-background text-foreground overflow-hidden">
@@ -35,16 +38,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Download</span>
             </Link>
-            {user?.role === "admin" && (
-              <Link href="/admin/users" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+            {adminHref && (
+              <Link href={adminHref} className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
                 <Shield className="w-4 h-4" />
                 <span className="hidden sm:inline">Admin</span>
-              </Link>
-            )}
-            {canViewAdminStats && (
-              <Link href="/admin/stats" className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
-                <ChartColumn className="w-4 h-4" />
-                <span className="hidden sm:inline">Stats</span>
               </Link>
             )}
             {user && <AccountModal />}

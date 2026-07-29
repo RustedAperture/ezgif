@@ -18,6 +18,32 @@ vi.mock("@/components/theme-toggle", () => ({
   ThemeToggle: () => <div>Theme</div>,
 }));
 
+function adminUser({
+  isRootAdmin = false,
+  managePermissions = false,
+  viewAdminStats = false,
+}: {
+  isRootAdmin?: boolean;
+  managePermissions?: boolean;
+  viewAdminStats?: boolean;
+}) {
+  return {
+    user: {
+      id: "admin-1",
+      username: "admin",
+      display_name: null,
+      avatar_url: null,
+      role: "admin" as const,
+      is_root_admin: isRootAdmin,
+      permissions: {
+        upload_local_images: false,
+        manage_permissions: managePermissions,
+        view_admin_stats: viewAdminStats,
+      },
+    },
+  };
+}
+
 describe("AppShell", () => {
   afterEach(() => {
     cleanup();
@@ -27,21 +53,8 @@ describe("AppShell", () => {
     mocks.useUser.mockReset();
   });
 
-  it("hides the stats link for an admin without stats access", () => {
-    mocks.useUser.mockReturnValue({
-      user: {
-        id: "admin-1",
-        username: "admin",
-        display_name: null,
-        avatar_url: null,
-        role: "admin",
-        is_root_admin: false,
-        permissions: {
-          upload_local_images: false,
-          view_admin_stats: false,
-        },
-      },
-    });
+  it("hides the admin link for an admin without admin-area access", () => {
+    mocks.useUser.mockReturnValue(adminUser({}));
 
     render(
       <AppShell>
@@ -49,25 +62,12 @@ describe("AppShell", () => {
       </AppShell>,
     );
 
-    expect(screen.getByRole("link", { name: "Admin" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Stats" })).toBeNull();
   });
 
-  it("shows the stats link for an admin with stats access", () => {
-    mocks.useUser.mockReturnValue({
-      user: {
-        id: "admin-1",
-        username: "admin",
-        display_name: null,
-        avatar_url: null,
-        role: "admin",
-        is_root_admin: false,
-        permissions: {
-          upload_local_images: false,
-          view_admin_stats: true,
-        },
-      },
-    });
+  it("uses /admin/users for the top-level admin link when the user can manage permissions", () => {
+    mocks.useUser.mockReturnValue(adminUser({ managePermissions: true }));
 
     render(
       <AppShell>
@@ -75,24 +75,12 @@ describe("AppShell", () => {
       </AppShell>,
     );
 
-    expect(screen.getByRole("link", { name: "Stats" }).getAttribute("href")).toBe("/admin/stats");
+    expect(screen.getByRole("link", { name: "Admin" }).getAttribute("href")).toBe("/admin/users");
+    expect(screen.queryByRole("link", { name: "Stats" })).toBeNull();
   });
 
-  it("shows the stats link for a root admin without an explicit stats grant", () => {
-    mocks.useUser.mockReturnValue({
-      user: {
-        id: "root-1",
-        username: "root",
-        display_name: null,
-        avatar_url: null,
-        role: "admin",
-        is_root_admin: true,
-        permissions: {
-          upload_local_images: false,
-          view_admin_stats: false,
-        },
-      },
-    });
+  it("uses /admin/stats for the top-level admin link when stats is the only admin-area access", () => {
+    mocks.useUser.mockReturnValue(adminUser({ viewAdminStats: true }));
 
     render(
       <AppShell>
@@ -100,6 +88,20 @@ describe("AppShell", () => {
       </AppShell>,
     );
 
-    expect(screen.getByRole("link", { name: "Stats" }).getAttribute("href")).toBe("/admin/stats");
+    expect(screen.getByRole("link", { name: "Admin" }).getAttribute("href")).toBe("/admin/stats");
+    expect(screen.queryByRole("link", { name: "Stats" })).toBeNull();
+  });
+
+  it("prefers /admin/users for a root admin", () => {
+    mocks.useUser.mockReturnValue(adminUser({ isRootAdmin: true }));
+
+    render(
+      <AppShell>
+        <p>Child</p>
+      </AppShell>,
+    );
+
+    expect(screen.getByRole("link", { name: "Admin" }).getAttribute("href")).toBe("/admin/users");
+    expect(screen.queryByRole("link", { name: "Stats" })).toBeNull();
   });
 });
