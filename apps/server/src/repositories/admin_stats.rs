@@ -218,7 +218,7 @@ async fn current_unique_file_count(pool: &SqlitePool) -> Result<Option<i64>, sql
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cdn_objects")
         .fetch_one(pool)
         .await?;
-    Ok((count > 0).then_some(count))
+    Ok(Some(count))
 }
 
 async fn total_sends(pool: &SqlitePool) -> Result<i64, sqlx::Error> {

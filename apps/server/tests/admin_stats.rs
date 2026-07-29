@@ -86,7 +86,7 @@ async fn historical_backfill_leaves_unavailable_file_metrics_null() {
 }
 
 #[tokio::test]
-async fn refreshing_same_day_preserves_seeded_nullable_file_metrics() {
+async fn refreshing_same_day_updates_unique_file_count_to_zero_and_preserves_b2_metrics() {
     let pool = test_pool().await;
     seed_stats_fixture(&pool).await;
     let repo = AdminStatsRepository::new(pool.clone());
@@ -106,6 +106,8 @@ async fn refreshing_same_day_preserves_seeded_nullable_file_metrics() {
         },
     )
     .await;
+    insert_cdn_object(&pool, "fixture-hash-a", "https://cdn.example.com/a.gif").await;
+    clear_cdn_objects(&pool).await;
     insert_image_for_fixture_user(&pool).await;
 
     let refreshed = repo.refresh_current_snapshot(date).await.unwrap();
@@ -114,7 +116,7 @@ async fn refreshing_same_day_preserves_seeded_nullable_file_metrics() {
     assert_eq!(refreshed.bucket_count, 3);
     assert_eq!(refreshed.image_link_count, 5);
     assert_eq!(refreshed.send_count, 5);
-    assert_eq!(refreshed.unique_file_count, Some(9));
+    assert_eq!(refreshed.unique_file_count, Some(0));
     assert_eq!(refreshed.b2_object_count, Some(11));
     assert_eq!(refreshed.b2_bytes, Some(222));
 }
@@ -386,6 +388,22 @@ async fn seed_snapshot_row(pool: &SqlitePool, date: NaiveDate, seed: SnapshotSee
     .execute(pool)
     .await
     .unwrap();
+}
+
+async fn insert_cdn_object(pool: &SqlitePool, content_hash: &str, cdn_url: &str) {
+    sqlx::query("INSERT INTO cdn_objects (content_hash, cdn_url) VALUES (?, ?)")
+        .bind(content_hash)
+        .bind(cdn_url)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn clear_cdn_objects(pool: &SqlitePool) {
+    sqlx::query("DELETE FROM cdn_objects")
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 async fn set_timestamp(
