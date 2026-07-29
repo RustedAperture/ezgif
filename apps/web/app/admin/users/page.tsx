@@ -1,9 +1,9 @@
 import { AdminUsersTable } from "@/components/admin-users-table";
-import { RequireAdmin } from "@/components/require-admin";
+import { RequireManagePermissions } from "@/components/require-manage-permissions";
 
 export default function AdminUsersPage() {
   return (
-    <RequireAdmin>
+    <RequireManagePermissions>
       <div className="flex min-h-0 flex-1 flex-col gap-6">
         <div>
           <h1 className="text-2xl font-semibold">Admin users</h1>
@@ -11,6 +11,6 @@ export default function AdminUsersPage() {
         </div>
         <AdminUsersTable />
       </div>
-    </RequireAdmin>
+    </RequireManagePermissions>
   );
 }
