@@ -32,6 +32,27 @@ export type AdminUser = {
   permissions: AdminPermissions;
 };
 
+export type AdminStatsSnapshot = {
+  snapshot_date: string;
+  user_count: number;
+  bucket_count: number;
+  image_link_count: number;
+  unique_file_count: number | null;
+  send_count: number;
+  b2_object_count: number | null;
+  b2_bytes: number | null;
+};
+
+export type AdminStatsResponse = {
+  current: AdminStatsSnapshot;
+  history: AdminStatsSnapshot[];
+  storage: {
+    configured: boolean;
+    available: boolean;
+    first_complete_history_date: string | null;
+  };
+};
+
 export type CategorySummary = {
   id: string;
   name: string;
