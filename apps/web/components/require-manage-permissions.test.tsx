@@ -80,6 +80,52 @@ describe("RequireManagePermissions", () => {
     expect(mocks.push).not.toHaveBeenCalled();
   });
 
+  it("sends unauthenticated users to login", async () => {
+    mocks.useUser.mockReturnValue({
+      loading: false,
+      user: null,
+    });
+
+    render(
+      <RequireManagePermissions>
+        <p>Admin users</p>
+      </RequireManagePermissions>,
+    );
+
+    expect(screen.getByText("Loading...")).toBeTruthy();
+    expect(screen.queryByText("Admin users")).toBeNull();
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/login"));
+  });
+
+  it("sends authenticated non-admin users back to the dashboard", async () => {
+    mocks.useUser.mockReturnValue({
+      loading: false,
+      user: {
+        id: "user-1",
+        username: "member",
+        display_name: null,
+        avatar_url: null,
+        role: "user",
+        is_root_admin: false,
+        permissions: {
+          upload_local_images: false,
+          manage_permissions: false,
+          view_admin_stats: false,
+        },
+      },
+    });
+
+    render(
+      <RequireManagePermissions>
+        <p>Admin users</p>
+      </RequireManagePermissions>,
+    );
+
+    expect(screen.getByText("You do not have permission to view this page.")).toBeTruthy();
+    expect(screen.queryByText("Admin users")).toBeNull();
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/"));
+  });
+
   it("sends admins without manage access to stats when they can still view admin stats", async () => {
     mocks.useUser.mockReturnValue({
       loading: false,
