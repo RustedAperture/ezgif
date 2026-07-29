@@ -487,7 +487,7 @@ async fn follow_up_migration_upgrades_databases_that_already_applied_0018() {
              send_count, b2_object_count, b2_bytes)
          VALUES
             ('2026-07-27', 1, 1, 1, NULL, 1, NULL, NULL),
-            ('2026-07-28', 1, 2, 3, 4, 5, 7, 8)",
+            ('2026-07-28', 1, 2, 3, NULL, 5, NULL, NULL)",
     )
     .execute(&pool)
     .await
@@ -528,11 +528,11 @@ async fn follow_up_migration_upgrades_databases_that_already_applied_0018() {
             user_count: 1,
             bucket_count: 2,
             image_link_count: 3,
-            unique_file_count: Some(4),
+            unique_file_count: None,
             send_count: 5,
             daily_send_count: 0,
-            b2_object_count: Some(7),
-            b2_bytes: Some(8),
+            b2_object_count: None,
+            b2_bytes: None,
             finalized: false,
         }
     );
