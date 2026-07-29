@@ -8,6 +8,7 @@ export type User = {
   permissions: {
     upload_local_images: boolean;
     view_admin_stats: boolean;
+    manage_permissions: boolean;
   };
 };
 

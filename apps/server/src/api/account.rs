@@ -29,6 +29,7 @@ pub struct UserProfileResponse {
 pub struct UserProfilePermissions {
     pub upload_local_images: bool,
     pub view_admin_stats: bool,
+    pub manage_permissions: bool,
 }
 
 #[derive(Deserialize, Validate)]
@@ -140,6 +141,11 @@ pub async fn get_profile(
             .admin_repo
             .has_permission(user.user_id, "view_admin_stats")
             .await?;
+    let manage_permissions = is_root_admin
+        || state
+            .admin_repo
+            .has_permission(user.user_id, "manage_permissions")
+            .await?;
 
     Ok(Json(UserProfileResponse {
         id: stored.id.to_string(),
@@ -151,6 +157,7 @@ pub async fn get_profile(
         permissions: UserProfilePermissions {
             upload_local_images,
             view_admin_stats,
+            manage_permissions,
         },
     }))
 }
