@@ -103,14 +103,13 @@ async fn read_json(response: Response) -> serde_json::Value {
     serde_json::from_slice(&body).unwrap()
 }
 
-async fn snapshot_dates(pool: &SqlitePool) -> Vec<NaiveDate> {
+async fn snapshot_rows(
+    pool: &SqlitePool,
+) -> Vec<memebucket_server::repositories::admin_stats::AdminStatsSnapshot> {
     AdminStatsRepository::new(pool.clone())
         .list_snapshots()
         .await
         .unwrap()
-        .into_iter()
-        .map(|snapshot| snapshot.snapshot_date)
-        .collect()
 }
 
 #[tokio::test]
@@ -361,10 +360,10 @@ async fn stats_requires_view_permission_for_normal_admin() {
 #[tokio::test]
 async fn stats_allows_root_admin_and_returns_aggregate_history() {
     let fixture = stats_api_fixture().await;
-    let before_dates = snapshot_dates(&fixture.pool).await;
+    let before_rows = snapshot_rows(&fixture.pool).await;
 
     let response = get_stats(&fixture.app, &fixture.root).await;
-    let after_dates = snapshot_dates(&fixture.pool).await;
+    let after_rows = snapshot_rows(&fixture.pool).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = read_json(response).await;
@@ -377,15 +376,33 @@ async fn stats_allows_root_admin_and_returns_aggregate_history() {
     assert!(body["storage"]["available"].is_boolean());
     assert!(body.get("username").is_none());
     assert!(body.get("provider_user_id").is_none());
-    assert_eq!(before_dates.len(), 2);
+    assert_eq!(before_rows.len(), 2);
     assert_eq!(
-        before_dates,
+        before_rows,
         vec![
-            NaiveDate::from_ymd_opt(2026, 7, 28).unwrap(),
-            NaiveDate::from_ymd_opt(2026, 7, 27).unwrap(),
+            memebucket_server::repositories::admin_stats::AdminStatsSnapshot {
+                snapshot_date: NaiveDate::from_ymd_opt(2026, 7, 28).unwrap(),
+                user_count: 4,
+                bucket_count: 3,
+                image_link_count: 4,
+                unique_file_count: Some(0),
+                send_count: 5,
+                b2_object_count: None,
+                b2_bytes: None,
+            },
+            memebucket_server::repositories::admin_stats::AdminStatsSnapshot {
+                snapshot_date: NaiveDate::from_ymd_opt(2026, 7, 27).unwrap(),
+                user_count: 4,
+                bucket_count: 3,
+                image_link_count: 4,
+                unique_file_count: Some(0),
+                send_count: 5,
+                b2_object_count: None,
+                b2_bytes: None,
+            },
         ]
     );
-    assert_eq!(after_dates, before_dates);
+    assert_eq!(after_rows, before_rows);
     assert_eq!(history.len(), 2);
     assert_eq!(history[0]["snapshot_date"], "2026-07-27");
     assert_eq!(history[1]["snapshot_date"], "2026-07-28");
