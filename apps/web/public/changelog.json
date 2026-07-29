@@ -1,5 +1,17 @@
 [
   {
+    "version": "Unreleased",
+    "date": "Jul 29, 2026",
+    "sections": [
+      {
+        "heading": "Added",
+        "items": [
+          "Added an admin-only stats dashboard with aggregate totals and daily operational snapshots for overall usage and storage trends."
+        ]
+      }
+    ]
+  },
+  {
     "version": "0.2.10",
     "date": "Jul 17, 2026",
     "sections": [

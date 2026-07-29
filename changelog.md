@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added an admin-only stats dashboard with aggregate totals and daily operational snapshots for overall usage and storage trends.
+
 ## v0.2.10 - Jul 17, 2026
 
 ### Added
