@@ -13,6 +13,7 @@ memeBucket stores only the information needed to provide its media bucket featur
 - **Buckets and images:** bucket names, image or GIF URLs, optional image notes, creation timestamps, and related internal IDs.
 - **Sharing data:** share tokens, bucket subscription records, subscriber counts, whitelist settings, and whitelist membership.
 - **Send history:** records of image sends via Discord random commands and Picker selections (web and desktop), including bucket name, selected URL, visibility setting, and timestamp.
+- **Admin operational metrics:** admin-only aggregate stats and daily operational snapshots, including overall totals for accounts, buckets, image links, sends, and storage usage.
 
 ## How We Use Data
 
@@ -23,6 +24,7 @@ memeBucket uses this data to:
 - support Discord commands such as sending a random image from a bucket;
 - provide sharing, subscription, and whitelist features;
 - maintain sessions, CSRF protection, rate limiting, and basic service security;
+- support admin-only aggregate reporting about overall usage and storage trends;
 - export or delete account data when requested.
 
 ## Sharing and Visibility

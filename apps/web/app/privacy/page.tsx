@@ -5,7 +5,7 @@ export default function PrivacyPage() {
     <LegalPage
       title="Privacy Policy"
       description="What memeBucket collects, stores, and uses to provide Discord media buckets."
-      updated="Jun 28, 2026"
+      updated="Jul 29, 2026"
     >
       <LegalSection title="Data We Collect">
         <LegalList>
@@ -16,6 +16,7 @@ export default function PrivacyPage() {
           <li>Bucket names, image or GIF URLs, optional notes, creation timestamps, and related internal IDs.</li>
           <li>Share tokens, subscriptions, subscriber counts, whitelist settings, and whitelist membership.</li>
           <li>Send history (via Discord random commands and Picker selections), including bucket name, selected URL, visibility setting, and timestamp.</li>
+          <li>Admin-only aggregate stats and daily operational snapshots, including overall totals for accounts, buckets, image links, sends, and storage usage.</li>
         </LegalList>
       </LegalSection>
 
@@ -24,7 +25,8 @@ export default function PrivacyPage() {
           memeBucket uses this data to authenticate you with Discord, show and manage your
           buckets, send random media through Discord commands, support sharing and
           whitelist features, maintain sessions and CSRF protection, apply rate
-          limiting, and process export or deletion requests.
+          limiting, support admin-only aggregate reporting about overall usage and
+          storage trends, and process export or deletion requests.
         </p>
       </LegalSection>
 

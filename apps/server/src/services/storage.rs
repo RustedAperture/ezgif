@@ -1,3 +1,4 @@
+use futures_util::TryStreamExt;
 use object_store::{
     Attribute, AttributeValue, Attributes, ObjectStore, ObjectStoreExt, PutOptions,
     aws::AmazonS3Builder, path::Path as ObjPath,
@@ -14,6 +15,12 @@ pub enum StorageError {
     InvalidImage,
     #[error("upload failed: {0}")]
     UploadFailed(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageStats {
+    pub object_count: i64,
+    pub bytes: i64,
 }
 
 #[derive(Clone)]
@@ -74,6 +81,31 @@ impl StorageService {
 
     pub fn is_bluesky_media(url: &str) -> bool {
         url_host_matches(url, &["cdn.bsky.app"])
+    }
+
+    pub async fn list_stats(&self) -> Result<StorageStats, StorageError> {
+        let mut listing = self.store.list(None);
+        let mut object_count = 0_i64;
+        let mut bytes = 0_i64;
+
+        while let Some(meta) = listing.try_next().await.map_err(|error| {
+            tracing::error!("B2 stats listing failed: {error}");
+            StorageError::UploadFailed("storage stats listing failed".to_string())
+        })? {
+            let size = i64::try_from(meta.size)
+                .map_err(|_| StorageError::UploadFailed("storage stats overflowed".to_string()))?;
+            object_count = object_count.checked_add(1).ok_or_else(|| {
+                StorageError::UploadFailed("storage stats overflowed".to_string())
+            })?;
+            bytes = bytes.checked_add(size).ok_or_else(|| {
+                StorageError::UploadFailed("storage stats overflowed".to_string())
+            })?;
+        }
+
+        Ok(StorageStats {
+            object_count,
+            bytes,
+        })
     }
 
     /// Fetches `url` and re-hosts it on B2. Goes through the same SSRF-safe

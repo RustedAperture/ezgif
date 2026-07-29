@@ -7,6 +7,7 @@ export type User = {
   is_root_admin: boolean;
   permissions: {
     upload_local_images: boolean;
+    view_admin_stats: boolean;
   };
 };
 
@@ -29,6 +30,28 @@ export type AdminUser = {
   is_root_admin: boolean;
   identities: AdminIdentity[];
   permissions: AdminPermissions;
+};
+
+export type AdminStatsSnapshot = {
+  snapshot_date: string;
+  user_count: number;
+  bucket_count: number;
+  image_link_count: number;
+  unique_file_count: number | null;
+  send_count: number;
+  daily_send_count: number;
+  b2_object_count: number | null;
+  b2_bytes: number | null;
+};
+
+export type AdminStatsResponse = {
+  current: AdminStatsSnapshot;
+  history: AdminStatsSnapshot[];
+  storage: {
+    configured: boolean;
+    available: boolean;
+    first_complete_history_date: string | null;
+  };
 };
 
 export type CategorySummary = {

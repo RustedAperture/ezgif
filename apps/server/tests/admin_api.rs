@@ -479,6 +479,7 @@ async fn profile_exposes_missing_upload_permission_as_false() {
     let profile = json_body(get_profile(&fixture.app, &fixture.target).await).await;
 
     assert_eq!(profile["permissions"]["upload_local_images"], false);
+    assert_eq!(profile["permissions"]["view_admin_stats"], false);
 }
 
 #[tokio::test]
@@ -497,6 +498,26 @@ async fn profile_exposes_explicit_upload_permission_as_true() {
     let profile = json_body(get_profile(&fixture.app, &fixture.target).await).await;
 
     assert_eq!(profile["permissions"]["upload_local_images"], true);
+    assert_eq!(profile["permissions"]["view_admin_stats"], false);
+}
+
+#[tokio::test]
+async fn profile_exposes_explicit_stats_permission_as_true() {
+    let fixture = admin_fixture().await;
+
+    patch_permission(
+        &fixture.app,
+        &fixture.root,
+        fixture.target.id,
+        "view_admin_stats",
+        true,
+    )
+    .await;
+
+    let profile = json_body(get_profile(&fixture.app, &fixture.target).await).await;
+
+    assert_eq!(profile["permissions"]["upload_local_images"], false);
+    assert_eq!(profile["permissions"]["view_admin_stats"], true);
 }
 
 #[tokio::test]
@@ -506,6 +527,7 @@ async fn profile_exposes_root_upload_permission_without_explicit_row() {
     let profile = json_body(get_profile(&fixture.app, &fixture.root).await).await;
 
     assert_eq!(profile["permissions"]["upload_local_images"], true);
+    assert_eq!(profile["permissions"]["view_admin_stats"], true);
 }
 
 #[tokio::test]
