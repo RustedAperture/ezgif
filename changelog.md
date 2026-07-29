@@ -6,6 +6,7 @@
 
 - Added an admin-only stats dashboard with aggregate totals and UTC daily operational snapshots, including direct daily send activity and storage trends.
 - Added a unified, permission-aware admin sidebar that shows only the Users and Stats sections each admin can access.
+- Polished admin stats summary cards with bottom-aligned, animated count-up values.
 
 ## v0.2.10 - Jul 17, 2026
 
