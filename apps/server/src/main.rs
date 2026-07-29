@@ -1,12 +1,14 @@
+use chrono::{Days, Utc};
 use memebucket_server::{
     app_state::AppState,
     config::{Config, connect_sqlite_pool, connect_sqlite_pool_for_migrations},
     discord::commands::command_definitions,
     router::build_router,
+    services::admin_stats::AdminStatsService,
     services::migration::run_cdn_migration,
     services::storage::StorageService,
 };
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -77,21 +79,25 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    let app = build_router(
-        AppState::new(pool)
-            .with_root_admin_config(config.root_admin_config)
-            .with_session_secret(config.session_secret)
-            .with_app_user_key_secret(config.app_user_key_secret)
-            .with_discord_public_key(config.discord_public_key)
-            .with_discord_bot_token(config.discord_bot_token)
-            .with_static_dir(config.static_dir.clone())
-            .with_klipy_api_key(config.klipy_api_key)
-            .with_telegram(
-                config.telegram_bot_token.unwrap_or_default(),
-                config.telegram_bot_username.unwrap_or_default(),
-            )
-            .with_storage(storage),
-    );
+    let state = AppState::new(pool)
+        .with_root_admin_config(config.root_admin_config)
+        .with_session_secret(config.session_secret)
+        .with_app_user_key_secret(config.app_user_key_secret)
+        .with_discord_public_key(config.discord_public_key)
+        .with_discord_bot_token(config.discord_bot_token)
+        .with_static_dir(config.static_dir.clone())
+        .with_klipy_api_key(config.klipy_api_key)
+        .with_telegram(
+            config.telegram_bot_token.unwrap_or_default(),
+            config.telegram_bot_username.unwrap_or_default(),
+        )
+        .with_storage(storage);
+    let admin_stats_service = state.admin_stats_service();
+    tokio::spawn(async move {
+        run_admin_stats_collector(admin_stats_service).await;
+    });
+
+    let app = build_router(state);
     let listener = TcpListener::bind(config.bind_addr).await?;
 
     tracing::info!("listening on {}", config.bind_addr);
@@ -130,5 +136,43 @@ async fn register_discord_commands(application_id: &str, bot_token: &str) {
                 tracing::warn!("error registering command {name}: {err}");
             }
         }
+    }
+}
+
+async fn run_admin_stats_collector(service: Arc<AdminStatsService>) {
+    refresh_admin_stats_once(service.as_ref()).await;
+
+    loop {
+        let now = Utc::now();
+        let next_boundary = now
+            .date_naive()
+            .checked_add_days(Days::new(1))
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .and_utc();
+        let sleep_duration = (next_boundary - now)
+            .to_std()
+            .unwrap_or(Duration::from_secs(0));
+
+        tokio::time::sleep(sleep_duration).await;
+        refresh_admin_stats_once(service.as_ref()).await;
+    }
+}
+
+async fn refresh_admin_stats_once(service: &AdminStatsService) {
+    let snapshot_date = Utc::now().date_naive();
+
+    match service.refresh_snapshot(snapshot_date).await {
+        Ok(result) => tracing::info!(
+            snapshot_date = %snapshot_date,
+            storage_available = result.storage_available,
+            "refreshed admin stats snapshot"
+        ),
+        Err(error) => tracing::warn!(
+            snapshot_date = %snapshot_date,
+            error = %error,
+            "failed to refresh admin stats snapshot"
+        ),
     }
 }

@@ -1,18 +1,104 @@
+use axum::{
+    Router,
+    body::Body,
+    http::{Request, StatusCode},
+    response::Response,
+};
 use chrono::NaiveDate;
+use http_body_util::BodyExt;
 use memebucket_server::repositories::{
     BucketRepo, ImageRepo, UserRepo, admin_stats::AdminStatsRepository, buckets::BucketRepository,
     images::ImageRepository, users::UserRepository,
 };
-use memebucket_server::services::{admin_stats::AdminStatsService, storage::StorageService};
+use memebucket_server::{
+    app_state::AppState,
+    auth::sessions::AuthenticatedUser,
+    config::RootAdminConfig,
+    repositories::users::StoredUser,
+    router::build_router_for_tests,
+    services::{admin_stats::AdminStatsService, storage::StorageService},
+};
 use object_store::{ObjectStoreExt, memory::InMemory, path::Path as ObjectPath};
 use sqlx::SqlitePool;
 use std::sync::Arc;
+use tower::ServiceExt;
 use uuid::Uuid;
+
+const ROOT_PROVIDER_ID: &str = "admin-stats-root-provider-id";
 
 async fn test_pool() -> SqlitePool {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     pool
+}
+
+struct StatsApiFixture {
+    app: Router,
+    root: StoredUser,
+    normal_admin: StoredUser,
+}
+
+async fn stats_api_fixture() -> StatsApiFixture {
+    let pool = test_pool().await;
+    seed_stats_fixture(&pool).await;
+
+    let users = UserRepository::new(pool.clone());
+    let root = users
+        .upsert_by_provider("discord", ROOT_PROVIDER_ID, Some("Root Admin"), None)
+        .await
+        .unwrap();
+    let normal_admin = users
+        .upsert_by_provider(
+            "discord",
+            "admin-stats-normal-admin",
+            Some("Normal Admin"),
+            None,
+        )
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE users SET role = 'admin' WHERE id = ?")
+        .bind(normal_admin.id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let normal_admin = users.get_by_id(normal_admin.id).await.unwrap().unwrap();
+    let state = AppState::for_tests(pool.clone()).with_root_admin_config(
+        RootAdminConfig::parse(&format!("discord:{ROOT_PROVIDER_ID}")).unwrap(),
+    );
+    let service = state.admin_stats_service();
+    service
+        .refresh_snapshot(NaiveDate::from_ymd_opt(2026, 7, 27).unwrap())
+        .await
+        .unwrap();
+    service
+        .refresh_snapshot(NaiveDate::from_ymd_opt(2026, 7, 28).unwrap())
+        .await
+        .unwrap();
+
+    StatsApiFixture {
+        app: build_router_for_tests(state),
+        root,
+        normal_admin,
+    }
+}
+
+async fn get_stats(app: &Router, user: &StoredUser) -> Response {
+    let mut request = Request::builder()
+        .uri("/api/admin/stats")
+        .body(Body::empty())
+        .unwrap();
+    request.extensions_mut().insert(AuthenticatedUser {
+        user_id: user.id,
+        role: user.role.clone(),
+    });
+    app.clone().oneshot(request).await.unwrap()
+}
+
+async fn read_json(response: Response) -> serde_json::Value {
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
 }
 
 #[tokio::test]
@@ -249,6 +335,37 @@ async fn b2_listing_failure_preserves_last_known_snapshot() {
     assert!(!refreshed.storage_available);
     assert_eq!(saved.b2_object_count, Some(11));
     assert_eq!(saved.b2_bytes, Some(222));
+}
+
+#[tokio::test]
+async fn stats_requires_view_permission_for_normal_admin() {
+    let fixture = stats_api_fixture().await;
+
+    let response = get_stats(&fixture.app, &fixture.normal_admin).await;
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn stats_allows_root_admin_and_returns_aggregate_history() {
+    let fixture = stats_api_fixture().await;
+
+    let response = get_stats(&fixture.app, &fixture.root).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = read_json(response).await;
+    let history = body["history"].as_array().unwrap();
+
+    assert!(body["current"]["user_count"].is_number());
+    assert!(body["current"]["snapshot_date"].is_string());
+    assert!(body["history"].is_array());
+    assert!(body["storage"]["configured"].is_boolean());
+    assert!(body["storage"]["available"].is_boolean());
+    assert!(body.get("username").is_none());
+    assert!(body.get("provider_user_id").is_none());
+    assert_eq!(history[0]["snapshot_date"], "2026-07-27");
+    assert_eq!(history[1]["snapshot_date"], "2026-07-28");
+    assert!(body["storage"]["first_complete_history_date"].is_null());
 }
 
 async fn seed_stats_fixture(pool: &SqlitePool) {

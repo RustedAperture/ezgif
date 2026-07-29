@@ -1,12 +1,13 @@
 use crate::repositories::{
     admin::AdminRepository,
+    admin_stats::AdminStatsRepository,
     buckets::{BucketRepo, BucketRepository},
     cached::{CachedBucketRepository, CachedImageRepository},
     images::{ImageRepo, ImageRepository},
     send_history::{SendHistoryRepo, SendHistoryRepository},
     users::{UserRepo, UserRepository},
 };
-use crate::services::storage::StorageService;
+use crate::services::{admin_stats::AdminStatsService, storage::StorageService};
 use crate::{auth::permissions, config::RootAdminConfig};
 use sqlx::SqlitePool;
 use std::{
@@ -42,6 +43,7 @@ pub struct AppState {
     telegram_bot_token: String,
     telegram_bot_username: String,
     pub storage: Option<Arc<StorageService>>,
+    admin_stats_service: Arc<AdminStatsService>,
     root_admin_config: RootAdminConfig,
 }
 
@@ -56,6 +58,10 @@ impl AppState {
             pool.clone(),
         )));
         let send_history_repo = Arc::new(SendHistoryRepository::new(pool.clone()));
+        let admin_stats_service = Arc::new(AdminStatsService::new(
+            AdminStatsRepository::new(pool.clone()),
+            None,
+        ));
 
         Self {
             pool,
@@ -76,6 +82,7 @@ impl AppState {
             telegram_bot_token: String::new(),
             telegram_bot_username: String::new(),
             storage: None,
+            admin_stats_service,
             root_admin_config: RootAdminConfig::default(),
         }
     }
@@ -182,11 +189,19 @@ impl AppState {
     }
 
     pub fn with_storage(mut self, storage: Option<StorageService>) -> Self {
+        self.admin_stats_service = Arc::new(AdminStatsService::new(
+            AdminStatsRepository::new(self.pool.clone()),
+            storage.clone(),
+        ));
         self.storage = storage.map(Arc::new);
         self
     }
 
     pub fn storage(&self) -> Option<&StorageService> {
         self.storage.as_deref()
+    }
+
+    pub fn admin_stats_service(&self) -> Arc<AdminStatsService> {
+        self.admin_stats_service.clone()
     }
 }
