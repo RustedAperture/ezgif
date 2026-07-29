@@ -148,13 +148,16 @@ async fn historical_backfill_uses_explicit_utc_dates_at_midnight_boundaries() {
 
 #[tokio::test]
 async fn storage_stats_sums_object_metadata_without_downloading_objects() {
-    let storage =
-        test_storage_with_objects(test_pool().await, &[("a.webp", 10), ("b.webp", 25)]).await;
+    let storage = test_storage_with_objects(
+        test_pool().await,
+        &[("a.webp", 10), ("nested/deep.webp", 7), ("b.webp", 25)],
+    )
+    .await;
 
     let stats = storage.list_stats().await.unwrap();
 
-    assert_eq!(stats.object_count, 2);
-    assert_eq!(stats.bytes, 35);
+    assert_eq!(stats.object_count, 3);
+    assert_eq!(stats.bytes, 42);
 }
 
 #[tokio::test]
@@ -182,23 +185,26 @@ async fn refresh_snapshot_without_storage_keeps_database_metrics_available() {
 }
 
 #[tokio::test]
-async fn refresh_snapshot_with_storage_records_b2_metrics() {
+async fn refresh_snapshot_with_storage_persists_provider_metrics_through_repository() {
     let pool = test_pool().await;
     seed_stats_fixture(&pool).await;
     insert_cdn_object(&pool, "fixture-hash-a", "https://cdn.example.com/a.webp").await;
 
     let repo = AdminStatsRepository::new(pool.clone());
-    let storage = test_storage_with_objects(pool.clone(), &[("a.webp", 10), ("b.webp", 25)]).await;
+    let storage =
+        test_storage_with_objects(test_pool().await, &[("a.webp", 10), ("b.webp", 25)]).await;
     let service = AdminStatsService::new(repo, Some(storage));
+    let date = NaiveDate::from_ymd_opt(2026, 7, 28).unwrap();
 
-    let refreshed = service
-        .refresh_snapshot(NaiveDate::from_ymd_opt(2026, 7, 28).unwrap())
-        .await
-        .unwrap();
+    let refreshed = service.refresh_snapshot(date).await.unwrap();
+    let history = service.load_history().await.unwrap();
+    let saved = snapshot_on(&history, date);
 
     assert_eq!(refreshed.snapshot.unique_file_count, Some(1));
     assert_eq!(refreshed.snapshot.b2_object_count, Some(2));
     assert_eq!(refreshed.snapshot.b2_bytes, Some(35));
+    assert_eq!(saved.b2_object_count, Some(2));
+    assert_eq!(saved.b2_bytes, Some(35));
     assert!(refreshed.storage_available);
 }
 

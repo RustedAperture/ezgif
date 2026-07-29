@@ -100,6 +100,27 @@ impl AdminStatsRepository {
         rows.into_iter().map(snapshot_from_row).collect()
     }
 
+    pub async fn apply_provider_metrics(
+        &self,
+        snapshot_date: NaiveDate,
+        b2_object_count: Option<i64>,
+        b2_bytes: Option<i64>,
+    ) -> Result<AdminStatsSnapshot, sqlx::Error> {
+        sqlx::query(
+            "UPDATE admin_stats_snapshots
+             SET b2_object_count = COALESCE(?, b2_object_count),
+                 b2_bytes = COALESCE(?, b2_bytes)
+             WHERE snapshot_date = ?",
+        )
+        .bind(b2_object_count)
+        .bind(b2_bytes)
+        .bind(snapshot_date.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        self.get_snapshot(snapshot_date).await
+    }
+
     async fn get_snapshot(
         &self,
         snapshot_date: NaiveDate,

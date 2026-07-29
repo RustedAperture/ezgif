@@ -1,3 +1,4 @@
+use futures_util::TryStreamExt;
 use object_store::{
     Attribute, AttributeValue, Attributes, ObjectStore, ObjectStoreExt, PutOptions,
     aws::AmazonS3Builder, path::Path as ObjPath,
@@ -83,33 +84,28 @@ impl StorageService {
     }
 
     pub async fn list_stats(&self) -> Result<StorageStats, StorageError> {
-        let listing = self
-            .store
-            .list_with_delimiter(None)
-            .await
-            .map_err(|error| {
-                tracing::error!("B2 stats listing failed: {error}");
-                StorageError::UploadFailed("storage stats listing failed".to_string())
-            })?;
+        let mut listing = self.store.list(None);
+        let mut object_count = 0_i64;
+        let mut bytes = 0_i64;
 
-        let object_count = i64::try_from(listing.objects.len())
-            .map_err(|_| StorageError::UploadFailed("storage stats overflowed".to_string()))?;
-        let bytes = listing.objects.into_iter().try_fold(0_i64, |total, meta| {
+        while let Some(meta) = listing.try_next().await.map_err(|error| {
+            tracing::error!("B2 stats listing failed: {error}");
+            StorageError::UploadFailed("storage stats listing failed".to_string())
+        })? {
             let size = i64::try_from(meta.size)
                 .map_err(|_| StorageError::UploadFailed("storage stats overflowed".to_string()))?;
-            total
-                .checked_add(size)
-                .ok_or_else(|| StorageError::UploadFailed("storage stats overflowed".to_string()))
-        })?;
+            object_count = object_count.checked_add(1).ok_or_else(|| {
+                StorageError::UploadFailed("storage stats overflowed".to_string())
+            })?;
+            bytes = bytes.checked_add(size).ok_or_else(|| {
+                StorageError::UploadFailed("storage stats overflowed".to_string())
+            })?;
+        }
 
         Ok(StorageStats {
             object_count,
             bytes,
         })
-    }
-
-    pub(crate) fn pool(&self) -> &SqlitePool {
-        &self.pool
     }
 
     /// Fetches `url` and re-hosts it on B2. Goes through the same SSRF-safe
