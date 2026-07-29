@@ -34,6 +34,7 @@ async fn test_pool() -> SqlitePool {
 
 struct StatsApiFixture {
     app: Router,
+    pool: SqlitePool,
     root: StoredUser,
     normal_admin: StoredUser,
 }
@@ -79,6 +80,7 @@ async fn stats_api_fixture() -> StatsApiFixture {
 
     StatsApiFixture {
         app: build_router_for_tests(state),
+        pool,
         root,
         normal_admin,
     }
@@ -99,6 +101,16 @@ async fn get_stats(app: &Router, user: &StoredUser) -> Response {
 async fn read_json(response: Response) -> serde_json::Value {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&body).unwrap()
+}
+
+async fn snapshot_dates(pool: &SqlitePool) -> Vec<NaiveDate> {
+    AdminStatsRepository::new(pool.clone())
+        .list_snapshots()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|snapshot| snapshot.snapshot_date)
+        .collect()
 }
 
 #[tokio::test]
@@ -349,20 +361,32 @@ async fn stats_requires_view_permission_for_normal_admin() {
 #[tokio::test]
 async fn stats_allows_root_admin_and_returns_aggregate_history() {
     let fixture = stats_api_fixture().await;
+    let before_dates = snapshot_dates(&fixture.pool).await;
 
     let response = get_stats(&fixture.app, &fixture.root).await;
+    let after_dates = snapshot_dates(&fixture.pool).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = read_json(response).await;
     let history = body["history"].as_array().unwrap();
 
     assert!(body["current"]["user_count"].is_number());
-    assert!(body["current"]["snapshot_date"].is_string());
+    assert_eq!(body["current"]["snapshot_date"], "2026-07-28");
     assert!(body["history"].is_array());
     assert!(body["storage"]["configured"].is_boolean());
     assert!(body["storage"]["available"].is_boolean());
     assert!(body.get("username").is_none());
     assert!(body.get("provider_user_id").is_none());
+    assert_eq!(before_dates.len(), 2);
+    assert_eq!(
+        before_dates,
+        vec![
+            NaiveDate::from_ymd_opt(2026, 7, 28).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 7, 27).unwrap(),
+        ]
+    );
+    assert_eq!(after_dates, before_dates);
+    assert_eq!(history.len(), 2);
     assert_eq!(history[0]["snapshot_date"], "2026-07-27");
     assert_eq!(history[1]["snapshot_date"], "2026-07-28");
     assert!(body["storage"]["first_complete_history_date"].is_null());

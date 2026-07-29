@@ -3,7 +3,6 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -180,10 +179,13 @@ pub async fn get_stats(
         return Err(AppError::Forbidden);
     }
 
-    let service = state.admin_stats_service();
-    let current = service.refresh_snapshot(Utc::now().date_naive()).await?;
-    let mut history = service.load_history().await?;
+    let mut history = state.admin_stats_service().load_history().await?;
     history.sort_by_key(|snapshot| snapshot.snapshot_date);
+    let current = history
+        .last()
+        .cloned()
+        .ok_or_else(|| AppError::InternalServerError("admin stats unavailable".to_string()))?;
+    let storage_configured = state.storage().is_some();
 
     let first_complete_history_date = history
         .iter()
@@ -191,11 +193,11 @@ pub async fn get_stats(
         .map(|snapshot| snapshot.snapshot_date.format("%Y-%m-%d").to_string());
 
     Ok(Json(AdminStatsResponse {
-        current: map_stats_snapshot(current.snapshot),
+        current: map_stats_snapshot(current.clone()),
         history: history.into_iter().map(map_stats_snapshot).collect(),
         storage: AdminStatsStorageResponse {
-            configured: state.storage().is_some(),
-            available: current.storage_available,
+            configured: storage_configured,
+            available: storage_configured && has_complete_storage_history(&current),
             first_complete_history_date,
         },
     }))
