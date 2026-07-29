@@ -7,6 +7,7 @@ export type User = {
   is_root_admin: boolean;
   permissions: {
     upload_local_images: boolean;
+    view_admin_stats: boolean;
   };
 };
 
